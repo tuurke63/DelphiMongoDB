@@ -217,7 +217,7 @@ type
 
     { Returns a document that describes the role of the mongod instance. If the optional
       field saslSupportedMechs is specified, the command also returns an array of
-      SASL mechanisms used to create the specified user’s credentials.
+      SASL mechanisms used to create the specified user's credentials.
       If the instance is a member of a replica set, then isMaster returns a subset
       of the replica set configuration and status including whether or not the instance
       is the primary of the replica set.
@@ -611,6 +611,27 @@ type
     function FindOne(const AFilter: tgoMongoFilter; const ASort: TgoMongoSort): TgoBsonDocument; overload;
     function FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort)
       : TgoBsonDocument; overload;
+
+    { Finds and updates the first document matching the query.
+
+      Parameters:
+        AFilter: The selection criteria for the modification.
+        ASort: A sort pattern to determine which document to modify.
+        ARemove: When true, removes the selected document.
+        AUpdate: The modifications to apply.
+        ANew: When true, returns the modified document rather than the original.
+        AFields: A projection to determine which fields to return.
+        AUpsert: When true, inserts a new document if no document matches the query.
+        ABypassDocumentValidation: Disables document validation.
+        AMaxTimeMS: The time limit for the command.
+
+      Returns:
+        The updated document.
+    }
+    function FindAndModify(
+      const AFilter: TgoMongoFilter; const ASort: TgoMongoSort; const AUpdate : TgoMongoUpdate;
+      const AFields: TgoBsonDocument; const ARemove, ANew, AUpsert, ABypassDocumentValidation: Boolean;
+      const AMaxTimeMS: Integer): TgoBsonDocument;
 
     { Counts the number of documents matching the filter.
 
@@ -1096,7 +1117,11 @@ type
     function FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort)
       : TgoBsonDocument; overload;
 
-    function Count: Integer; overload;
+    function FindAndModify(const AFilter: TgoMongoFilter; const ASort: TgoMongoSort; const AUpdate : TgoMongoUpdate;
+      const AFields: TgoBsonDocument; const ARemove, ANew, AUpsert, ABypassDocumentValidation: Boolean;
+      const AMaxTimeMS: Integer): TgoBsonDocument;
+
+   function Count: Integer; overload;
     function Count(const AFilter: tgoMongoFilter): Integer; overload;
 
     function CreateIndex(const AName: string; const AKeyFields: array of string; const AUnique: Boolean = false): Boolean;
@@ -2099,6 +2124,71 @@ end;
 function TgoMongoCollection.FindOne(const AFilter: tgoMongoFilter; const ASort: TgoMongoSort): TgoBsonDocument;
 begin
   Result := FindOne(FindOptions.filter(AFilter).sort(ASort));
+end;
+
+function TgoMongoCollection.FindAndModify(
+  const AFilter: TgoMongoFilter; const ASort: TgoMongoSort; const AUpdate : TgoMongoUpdate;
+  const AFields: TgoBsonDocument; const ARemove, ANew, AUpsert, ABypassDocumentValidation: Boolean;
+  const AMaxTimeMS: Integer): TgoBsonDocument;
+// https://www.mongodb.com/docs/v4.4/reference/command/findAndModify/#mongodb-dbcommand-dbcmd.findAndModify
+var
+  Writer: IgoBsonWriter;
+  Reply: IgoMongoReply;
+  LastErrObj: TgoBsonDocument;
+begin
+  Writer := TgoBsonWriter.Create;
+
+  Writer.WriteStartDocument;
+  Writer.WriteString('findAndModify', FName);
+  SpecifyDB(Writer);
+  SpecifyReadPreference(Writer);
+
+  if AFilter.IsNil = false then
+  begin
+    Writer.WriteName('query');
+    Writer.WriteRawBsonDocument(AFilter.ToBson);
+  end;
+
+  if ASort.IsNil = false then
+  begin
+    Writer.WriteName('sort');
+    Writer.WriteRawBsonDocument(ASort.ToBson);
+  end;
+
+  if AUpdate.IsNil = false then
+  begin
+    Writer.WriteName('update');
+    Writer.WriteRawBsonDocument(AUpdate.ToBson);
+  end;
+
+  if AFields.IsNil = false then
+  begin
+    Writer.WriteName('fields');
+    Writer.WriteRawBsonDocument(AFields.ToBson);
+  end;
+
+  Writer.WriteName('remove');
+  Writer.WriteBoolean(ARemove);
+  Writer.WriteName('new');
+  Writer.WriteBoolean(ANew);
+  Writer.WriteName('upsert');
+  Writer.WriteBoolean(AUpsert);
+  Writer.WriteName('bypassDocumentValidation');
+  Writer.WriteBoolean(ABypassDocumentValidation);
+  Writer.WriteName('maxTimeMS');
+  Writer.WriteInt32(AMaxTimeMS);
+
+  Writer.WriteEndDocument;
+
+  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  HandleCommandReply(Reply);
+  Result := Reply.FirstDoc;
+
+  LastErrObj := Result.Get('lastErrorObject','').ToBsonDocument;
+
+  if (LastErrObj.Get('n',0).AsInteger > 0) and (LastErrObj.Get('ok',true).ToBoolean = true)
+    then Result := Result.Get('value','').ToBsonDocument
+    else Result.SetNil;
 end;
 
 function TgoMongoCollection.InsertMany(const ADocuments: array of TgoBsonDocument; const AOrdered: Boolean): Integer;
