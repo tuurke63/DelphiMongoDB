@@ -363,6 +363,8 @@ type
       Returns:
       An array of documents in the cursor. }
     function ToArray: TArray<TgoBsonDocument>;
+
+    procedure FetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize);
   end;
 
   { Fluent Interface for igoMongoCollection.find(),
@@ -937,6 +939,8 @@ type
       destructor Destroy; override;
       constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference;
         const ADatabaseName, ACollectionName: string; const APage: TArray<TBytes>; const ACursorId: Int64);
+
+      procedure DoFetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize);
     end;
   private
     FProtocol: TgoMongoProtocol; // Reference
@@ -956,6 +960,7 @@ type
     constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const aNameSpace: string;
       const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64); overload;
 
+    procedure FetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize);
 {$ENDREGION 'Internal Declarations'}
   end;
 
@@ -1657,6 +1662,16 @@ begin
   FReadPreference := AReadPreference;
 end;
 
+procedure TgoMongoCursor.FetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer);
+begin
+  with GetEnumerator as TgoMongoCursor.TEnumerator do
+  try
+    DoFetchAll(ARef, ABatchSize);
+  finally
+    Free;
+  end;
+end;
+
 function TgoMongoCursor.GetEnumerator: TEnumerator<TgoBsonDocument>;
 begin
   Result := TEnumerator.Create(FProtocol, FReadPreference, FDatabaseName, FCollectionName, FInitialPage, FInitialCursorId);
@@ -1733,6 +1748,46 @@ begin
     end;
   end;
   inherited;
+end;
+
+procedure TgoMongoCursor.TEnumerator.DoFetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer);
+var
+  Value: TgoBsonValue;
+  I: Integer;
+begin
+  // Enum initial doc first (batchsize can be differ. for example  == 1)
+  while (FIndex < (Length(FPage) - 1)) do
+  begin
+    Inc(FIndex);
+    ARef(TgoBsonDocument.Load(FPage[FIndex]));
+  end;
+  SetLength(FPage, 0);
+
+
+  // Enum others using different batchsize and avoiding dynn-arrays (FPage) allocation and ToBSON+TgoBsonDocument.Load pair.
+  while FCursorID <> NoCursorID do
+  begin
+    var Writer: IgoBsonWriter := TgoBsonWriter.Create;
+    Writer.WriteStartDocument;
+    Writer.WriteInt64('getMore', FCursorId);
+    Writer.WriteString('collection', FCollectionName);
+    Writer.WriteInt32('batchSize', ABatchSize);
+
+    SpecifyDB(Writer);
+    SpecifyReadPreference(Writer);
+    Writer.WriteEndDocument;
+    var Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+    HandleTimeout(Reply);
+    FIndex := 0;
+    var ADoc := Reply.FirstDoc;
+    if ADoc.IsNil or not ADoc.Contains('cursor') then
+      Break;
+
+    var Cursor := ADoc['cursor'].asBsonDocument;
+    FCursorId := Cursor['id'];
+    for Value in Cursor['nextBatch'].AsBsonArray do
+      ARef(Value.asBsonDocument);
+  end;
 end;
 
 function TgoMongoCursor.TEnumerator.DoGetCurrent: TgoBsonDocument;
