@@ -201,7 +201,7 @@ type
   private
     procedure Send(const adata: tBytes);
     procedure Recover;
-    function WaitForReply(const ARequestId: Integer): IgoMongoReply;
+    function WaitForReply(const ARequestId: Integer; const AWaiterEvent: TEvent): IgoMongoReply;
     function TryGetReply(const ARequestId: Integer; out AReply: IgoMongoReply): Boolean; inline;
     function AddWaiter(const ARequestId: Integer): TEvent; inline;
     procedure RemoveWaiter(const ARequestId: Integer); inline;
@@ -1108,43 +1108,48 @@ begin
   else
     MsgHeader.flagbits := [];
 
-  data := tgoByteBuffer.Create;
+  var lWaiter:= AddWaiter(MsgHeader.Header.RequestID);
   try
-    data.AppendBuffer(MsgHeader, sizeof(MsgHeader));
-    // Append section of PayloadType 0, that contains the first document.
-    // Every op_msg MUST have ONE section of payload type 0.
-    // this is the standard command document, like {"insert": "collection"},
-    // plus write concern and other command arguments.
+    data := tgoByteBuffer.Create;
+    try
+      data.AppendBuffer(MsgHeader, sizeof(MsgHeader));
+      // Append section of PayloadType 0, that contains the first document.
+      // Every op_msg MUST have ONE section of payload type 0.
+      // this is the standard command document, like {"insert": "collection"},
+      // plus write concern and other command arguments.
 
-    paramtype := 0;
-    data.Append(paramtype);
-    data.Append(ParamType0);
+      paramtype := 0;
+      data.Append(paramtype);
+      data.Append(ParamType0);
 
-    // Some parameters may be dis-embedded from the first document and simply appended as sections of Payload Type 1,
-    // see https://github.com/mongodb/specifications/blob/master/source/message/OP_MSG.rst#command-arguments-as-payload
+      // Some parameters may be dis-embedded from the first document and simply appended as sections of Payload Type 1,
+      // see https://github.com/mongodb/specifications/blob/master/source/message/OP_MSG.rst#command-arguments-as-payload
 
-    for I := 0 to high(ParamsType1) do
-      ParamsType1[I].WriteTo(data);
+      for I := 0 to high(ParamsType1) do
+        ParamsType1[I].WriteTo(data);
 
-    { TODO : optional Checksum }
+      { TODO : optional Checksum }
 
-    // update message length in header
-    pHeader := @data.buffer[0];
-    pHeader.Header.MessageLength := data.Size;
-    T := data.ToBytes;
+      // update message length in header
+      pHeader := @data.buffer[0];
+      pHeader.Header.MessageLength := data.Size;
+      T := data.ToBytes;
 
-    if CompressionAllowed { and (length(T) > 256) } then
-      Compress(T);
+      if CompressionAllowed { and (length(T) > 256) } then
+        Compress(T);
 
-    Send(T);
+      Send(T);
+    finally
+      FreeAndNil(data);
+    end;
+
+    if not NoResponse then
+      result := WaitForReply(MsgHeader.Header.RequestID, lWaiter)
+    else
+      result := nil;
   finally
-    FreeAndNil(data);
+    RemoveWaiter(MsgHeader.Header.RequestID);
   end;
-
-  if not NoResponse then
-    result := WaitForReply(MsgHeader.Header.RequestID)
-  else
-    result := nil;
 end;
 
 function TgoMongoProtocol.HaveReplyMsgHeader(out AMsgHeader): Boolean;
@@ -1201,41 +1206,36 @@ begin
   end;
 end;
 
-function TgoMongoProtocol.WaitForReply(const ARequestId: Integer): IgoMongoReply;
+function TgoMongoProtocol.WaitForReply(const ARequestId: Integer; const AWaiterEvent: TEvent): IgoMongoReply;
 var
   Start, LastRecv: tStopWatch;
   ms: Int64;
 begin
   result := nil;
+
   { TODO : Handle per-request timeout as in findoptions.maxTimeMS }
   Start := ThisMoment;
+  while (ConnectionState = TgoConnectionState.Connected) and (not TryGetReply(ARequestId, result)) do
+  begin
+    if LastPartialReply(ARequestId, LastRecv) then // have partial reply ?
+      ms := LastRecv.ElapsedMilliseconds
+    else
+      ms := Start.ElapsedMilliseconds;
 
-  var lWaiter:= AddWaiter(ARequestId);
-  try
-    while (ConnectionState = TgoConnectionState.Connected) and (not TryGetReply(ARequestId, result)) do
-    begin
-      if LastPartialReply(ARequestId, LastRecv) then // have partial reply ?
-        ms := LastRecv.ElapsedMilliseconds // number of milliseconds "radiosilence" in large response
-      else // no partial reply either
-        ms := Start.ElapsedMilliseconds;
+    var lLeft := FSettings.ReplyTimeout - ms;
+    if lLeft <= 0 then
+      Break;
 
-      var lLeft := FSettings.ReplyTimeout - ms;
-      if lLeft <= 0 then
-        Break;
-
-      lWaiter.WaitFor(Min(lLeft, 100));
-    end;
-
-    if (result = nil) then
-      TryGetReply(ARequestId, result);
-
-    RemoveReply(ARequestId);
-
-    if (result = nil) then
-      Recover; // There could be trash in the input buffer, blocking the system
-  finally
-    RemoveWaiter(ARequestId);
+    AWaiterEvent.WaitFor(Min(lLeft, 100));
   end;
+
+  if (result = nil) then
+    TryGetReply(ARequestId, result);
+
+  RemoveReply(ARequestId);
+
+  if (result = nil) then
+    Recover; // There could be trash in the input buffer, blocking the system
 end;
 
 procedure TgoMongoProtocol.Recover;

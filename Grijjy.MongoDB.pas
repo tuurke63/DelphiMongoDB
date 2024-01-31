@@ -1753,7 +1753,6 @@ end;
 procedure TgoMongoCursor.TEnumerator.DoFetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer);
 var
   Value: TgoBsonValue;
-  I: Integer;
 begin
   // Enum initial doc first (batchsize can be differ. for example  == 1)
   while (FIndex < (Length(FPage) - 1)) do
