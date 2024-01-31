@@ -13,6 +13,7 @@ uses
   System.SyncObjs,
   System.SysUtils,
   System.Generics.Collections,
+  System.Classes,
   Grijjy.SysUtils,
 {$IF Defined(MSWINDOWS)}
   Grijjy.SocketPool.Win,
@@ -183,6 +184,7 @@ type
     FConnection: TgoSocketConnection;
     FConnectionLock: TCriticalSection;
     FCompletedReplies: TDictionary<Integer, IgoMongoReply>;
+    FReplyWaiters: TObjectDictionary<Integer, TEvent>;
     FPartialReplies: TDictionary<Integer, tStopWatch>;
     FRepliesLock: TCriticalSection;
     FRecvBuffer: tBytes;
@@ -201,6 +203,9 @@ type
     procedure Recover;
     function WaitForReply(const ARequestId: Integer): IgoMongoReply;
     function TryGetReply(const ARequestId: Integer; out AReply: IgoMongoReply): Boolean; inline;
+    function AddWaiter(const ARequestId: Integer): TEvent; inline;
+    procedure RemoveWaiter(const ARequestId: Integer); inline;
+
     function LastPartialReply(const ARequestId: Integer; out ALastRecv: tStopWatch): Boolean;
 
     function HaveReplyMsgHeader(out AMsgHeader; tb: tBytes; Size: Integer): Boolean; overload;
@@ -440,6 +445,18 @@ begin
   result := OpMsg(False, Writer.ToBson, nil)
 end;
 
+function TgoMongoProtocol.AddWaiter(const ARequestId: Integer): TEvent;
+begin
+  Result := TEvent.Create(nil, True, False, EmptyStr);
+
+  FRepliesLock.Enter;
+  try
+    FReplyWaiters.Add(ARequestId, Result);
+  finally
+    FRepliesLock.Leave;
+  end;
+end;
+
 function TgoMongoProtocol.Authenticate: Boolean;
 var
   Scram: TgoScram;
@@ -661,6 +678,7 @@ begin
   FRepliesLock := TCriticalSection.Create;
   FRecvBufferLock := TCriticalSection.Create;
   FCompletedReplies := TDictionary<Integer, IgoMongoReply>.Create;
+  FReplyWaiters := TObjectDictionary<Integer, TEvent>.Create([doOwnsValues]);
   FPartialReplies := TDictionary<Integer, tStopWatch>.Create;
   SetLength(FRecvBuffer, RECV_BUFFER_SIZE);
   InitialHandshake;
@@ -700,6 +718,7 @@ begin
     end;
   end;
 
+  FReplyWaiters.Free;
   FRepliesLock.Free;
   FConnectionLock.Free;
   FRecvBufferLock.Free;
@@ -1187,29 +1206,36 @@ var
   Start, LastRecv: tStopWatch;
   ms: Int64;
 begin
-  { TODO : Handle per-request timeout as in findoptions.maxTimeMS }
   result := nil;
+  { TODO : Handle per-request timeout as in findoptions.maxTimeMS }
   Start := ThisMoment;
-  while (ConnectionState = TgoConnectionState.Connected) and (not TryGetReply(ARequestId, result)) do
-  begin
-    if LastPartialReply(ARequestId, LastRecv) then // have partial reply ?
-      ms := LastRecv.ElapsedMilliseconds // number of milliseconds "radiosilence" in large response
-    else // no partial reply either
-      ms := Start.ElapsedMilliseconds;
 
-    if ms > FSettings.ReplyTimeout then
-      Break;
+  var lWaiter:= AddWaiter(ARequestId);
+  try
+    while (ConnectionState = TgoConnectionState.Connected) and (not TryGetReply(ARequestId, result)) do
+    begin
+      if LastPartialReply(ARequestId, LastRecv) then // have partial reply ?
+        ms := LastRecv.ElapsedMilliseconds // number of milliseconds "radiosilence" in large response
+      else // no partial reply either
+        ms := Start.ElapsedMilliseconds;
 
-    Sleep(5);
+      var lLeft := FSettings.ReplyTimeout - ms;
+      if lLeft <= 0 then
+        Break;
+
+      lWaiter.WaitFor(Min(lLeft, 100));
+    end;
+
+    if (result = nil) then
+      TryGetReply(ARequestId, result);
+
+    RemoveReply(ARequestId);
+
+    if (result = nil) then
+      Recover; // There could be trash in the input buffer, blocking the system
+  finally
+    RemoveWaiter(ARequestId);
   end;
-
-  if (result = nil) then
-    TryGetReply(ARequestId, result);
-
-  RemoveReply(ARequestId);
-
-  if (result = nil) then
-    Recover; // There could be trash in the input buffer, blocking the system
 end;
 
 procedure TgoMongoProtocol.Recover;
@@ -1261,6 +1287,11 @@ begin
               FPartialReplies.Remove(MongoReply.ResponseTo);
               { Add the completed reply to the dictionary }
               FCompletedReplies.Add(MongoReply.ResponseTo, MongoReply);
+
+              { trigger waiter event, if present }
+              var lEvent: TEvent;
+              if FReplyWaiters.TryGetValue(MongoReply.ResponseTo, lEvent) then
+                lEvent.SetEvent;
             finally
               FRepliesLock.Release;
             end;
@@ -1279,7 +1310,6 @@ begin
               else
                 FRecvSize := 0;
             end;
-            { TODO : Faster wakeup of waiting thread ??? }
           end;
 
         tgoReplyValidationResult.rvrGrowing:
@@ -1334,6 +1364,16 @@ begin
     FCompletedReplies.Remove(ARequestId);
   finally
     FRepliesLock.Release;
+  end;
+end;
+
+procedure TgoMongoProtocol.RemoveWaiter(const ARequestId: Integer);
+begin
+  FRepliesLock.Enter;
+  try
+    FReplyWaiters.Remove(ARequestId);
+  finally
+    FRepliesLock.Leave;
   end;
 end;
 
