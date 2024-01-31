@@ -364,7 +364,7 @@ type
       An array of documents in the cursor. }
     function ToArray: TArray<TgoBsonDocument>;
 
-    procedure FetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize);
+    function FetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize): Integer;
   end;
 
   { Fluent Interface for igoMongoCollection.find(),
@@ -940,7 +940,7 @@ type
       constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference;
         const ADatabaseName, ACollectionName: string; const APage: TArray<TBytes>; const ACursorId: Int64);
 
-      procedure DoFetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize);
+      function DoFetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize): Integer;
     end;
   private
     FProtocol: TgoMongoProtocol; // Reference
@@ -960,7 +960,7 @@ type
     constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const aNameSpace: string;
       const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64); overload;
 
-    procedure FetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize);
+    function FetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize): Integer;
 {$ENDREGION 'Internal Declarations'}
   end;
 
@@ -1662,11 +1662,11 @@ begin
   FReadPreference := AReadPreference;
 end;
 
-procedure TgoMongoCursor.FetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer);
+function TgoMongoCursor.FetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer): Integer;
 begin
   with GetEnumerator as TgoMongoCursor.TEnumerator do
   try
-    DoFetchAll(ARef, ABatchSize);
+    Result := DoFetchAll(ARef, ABatchSize);
   finally
     Free;
   end;
@@ -1750,14 +1750,16 @@ begin
   inherited;
 end;
 
-procedure TgoMongoCursor.TEnumerator.DoFetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer);
+function TgoMongoCursor.TEnumerator.DoFetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer): Integer;
 var
   Value: TgoBsonValue;
 begin
+  Result := 0;
   // Enum initial doc first (batchsize can be differ. for example  == 1)
   while (FIndex < (Length(FPage) - 1)) do
   begin
     Inc(FIndex);
+    Inc(Result);
     ARef(TgoBsonDocument.Load(FPage[FIndex]));
   end;
   SetLength(FPage, 0);
@@ -1785,7 +1787,10 @@ begin
     var Cursor := ADoc['cursor'].asBsonDocument;
     FCursorId := Cursor['id'];
     for Value in Cursor['nextBatch'].AsBsonArray do
+    begin
+      Inc(Result);
       ARef(Value.asBsonDocument);
+    end;
   end;
 end;
 

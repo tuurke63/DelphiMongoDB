@@ -1108,7 +1108,7 @@ begin
   else
     MsgHeader.flagbits := [];
 
-  var lWaiter:= AddWaiter(MsgHeader.Header.RequestID);
+  var lWaiter := AddWaiter(MsgHeader.Header.RequestID);
   try
     data := tgoByteBuffer.Create;
     try
@@ -1215,26 +1215,27 @@ begin
 
   { TODO : Handle per-request timeout as in findoptions.maxTimeMS }
   Start := ThisMoment;
-  while (ConnectionState = TgoConnectionState.Connected) and (not TryGetReply(ARequestId, result)) do
+  while (ConnectionState = TgoConnectionState.Connected) do
   begin
-    if LastPartialReply(ARequestId, LastRecv) then // have partial reply ?
-      ms := LastRecv.ElapsedMilliseconds
-    else
-      ms := Start.ElapsedMilliseconds;
-
-    var lLeft := FSettings.ReplyTimeout - ms;
+    var lLeft := FSettings.ReplyTimeout - Start.ElapsedMilliseconds;
     if lLeft <= 0 then
+    begin
+      if not LastPartialReply(ARequestId, LastRecv) then
+        Break;
+
+      lLeft := FSettings.ReplyTimeout - LastRecv.ElapsedMilliseconds;
+      if lLeft <= 0 then
+        Break;
+    end;
+
+    AWaiterEvent.WaitFor(Min(lLeft, 1000));
+    if TryGetReply(ARequestId, Result) then
       Break;
-
-    AWaiterEvent.WaitFor(Min(lLeft, 100));
   end;
-
-  if (result = nil) then
-    TryGetReply(ARequestId, result);
 
   RemoveReply(ARequestId);
 
-  if (result = nil) then
+  if (Result = nil) then
     Recover; // There could be trash in the input buffer, blocking the system
 end;
 
