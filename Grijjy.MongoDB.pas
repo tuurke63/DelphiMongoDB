@@ -1762,7 +1762,6 @@ begin
   end;
   FBatch.Clear;
 
-  // Enum others using different batchsize and avoiding dynn-arrays (FPage) allocation and ToBSON+TgoBsonDocument.Load pair.
   while FCursorID <> NoCursorID do
   begin
     var Writer: IgoBsonWriter := TgoBsonWriter.Create;
