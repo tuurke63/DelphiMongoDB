@@ -81,7 +81,7 @@ begin
       result := (status = Snappy_OK);
       if result then
       begin
-        result := (ExpandedSize = aUncompressedSize);
+        result := (ExpandedSize = NativeUInt(aUncompressedSize));
         if result then
         begin
           setlength(tempbuffer, ExpandedSize);

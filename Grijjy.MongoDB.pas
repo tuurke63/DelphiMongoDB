@@ -924,7 +924,7 @@ type
       FProtocol: TgoMongoProtocol; // Reference
       FDatabaseName: string;
       FCollectionName: string;
-      FPage: TArray<TBytes>;
+      FBatch: TgoBsonArray;
       FCursorId: Int64;
       FIndex: Integer;
       FReadPreference: tgoMongoReadPreference;
@@ -938,7 +938,7 @@ type
     public
       destructor Destroy; override;
       constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference;
-        const ADatabaseName, ACollectionName: string; const APage: TArray<TBytes>; const ACursorId: Int64);
+        const ADatabaseName, ACollectionName: string; const AInitialBatch: TgoBsonArray; const ACursorId: Int64);
 
       function DoFetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize): Integer;
     end;
@@ -946,7 +946,7 @@ type
     FProtocol: TgoMongoProtocol; // Reference
     FDatabaseName: string;
     FCollectionName: string;
-    FInitialPage: TArray<TBytes>;
+    FInitialBatch: TgoBsonArray;
     FInitialCursorId: Int64;
     FReadPreference: tgoMongoReadPreference;
   public
@@ -955,10 +955,10 @@ type
     function ToArray: TArray<TgoBsonDocument>;
   public
     constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference;
-      const ADatabaseName, ACollectionName: string; const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64); overload;
+      const ADatabaseName, ACollectionName: string; const AInitialBatch: TgoBsonArray; const AInitialCursorId: Int64); overload;
 
     constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const aNameSpace: string;
-      const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64); overload;
+      const AInitialBatch: TgoBsonArray; const AInitialCursorId: Int64); overload;
 
     function FetchAll(ARef: TProc<TgoBsonDocument>; ABatchSize: Integer = MongoDefBatchSize): Integer;
 {$ENDREGION 'Internal Declarations'}
@@ -1005,11 +1005,8 @@ function CreateCursor(const ADoc: TgoBsonDocument; AProtocol: TgoMongoProtocol; 
 var
   Cursor: TgoBsonDocument;
   Value: TgoBsonValue;
-  I: Integer;
   CursorID: Int64;
   Namespace: string;
-  Docs: TgoBsonArray;
-  InitialPage: TArray<TBytes>;
 begin
   if not ADoc.IsNil then
   begin
@@ -1018,25 +1015,22 @@ begin
       if (Cursor.TryGetValue('firstBatch', Value)) then
       begin
         // Note: The firstBatch array may be an empty resultset.
-        Docs := Value.AsBsonArray;
-        SetLength(InitialPage, Docs.Count);
-        for I := 0 to Docs.Count - 1 do
-          InitialPage[I] := Docs[I].asBsonDocument.ToBson;
-        Result := TgoMongoCursor.Create(AProtocol, AReadPreference, Namespace, InitialPage, CursorID);
+        var lDocs := Value.AsBsonArray;
+        Result := TgoMongoCursor.Create(AProtocol, AReadPreference, Namespace, lDocs, CursorID);
       end;
     end
-    else // Some admin queries return just one document
+    else
     begin
-      SetLength(InitialPage, 1);
-      InitialPage[0] := ADoc.ToBson;
-      Result := TgoMongoCursor.Create(AProtocol, AReadPreference, 'null.null', InitialPage, NoCursorID);
+      // Some admin queries return just one document
+      var lDocs := TgoBsonArray.Create([ADoc]);
+      Result := TgoMongoCursor.Create(AProtocol, AReadPreference, 'null.null', lDocs, NoCursorID);
     end;
   end
   else
   begin
     // Empty Cursor
-    SetLength(InitialPage, 0);
-    Result := TgoMongoCursor.Create(AProtocol, AReadPreference, 'null.null', InitialPage, NoCursorID);
+    var lDocs := TgoBsonArray.Create();
+    Result := TgoMongoCursor.Create(AProtocol, AReadPreference, 'null.null', lDocs, NoCursorID);
   end;
 end;
 
@@ -1636,19 +1630,19 @@ end;
 { TgoMongoCursor }
 
 constructor TgoMongoCursor.Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference;
-const ADatabaseName, ACollectionName: string; const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64);
+const ADatabaseName, ACollectionName: string; const AInitialBatch: TgoBsonArray; const AInitialCursorId: Int64);
 begin
   inherited Create;
   FProtocol := AProtocol;
   FDatabaseName := ADatabaseName;
   FCollectionName := ACollectionName;
-  FInitialPage := AInitialPage;
+  FInitialBatch := AInitialBatch;
   FInitialCursorId := AInitialCursorId;
   FReadPreference := AReadPreference;
 end;
 
 constructor TgoMongoCursor.Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const aNameSpace: string;
-const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64);
+const AInitialBatch: TgoBsonArray; const AInitialCursorId: Int64);
 var
   dotpos: Integer;
 begin
@@ -1657,7 +1651,7 @@ begin
   FProtocol := AProtocol;
   FDatabaseName := copy(aNameSpace, 1, dotpos - 1);
   FCollectionName := copy(aNameSpace, dotpos + 1, Length(aNameSpace));
-  FInitialPage := AInitialPage;
+  FInitialBatch := AInitialBatch;
   FInitialCursorId := AInitialCursorId;
   FReadPreference := AReadPreference;
 end;
@@ -1674,29 +1668,32 @@ end;
 
 function TgoMongoCursor.GetEnumerator: TEnumerator<TgoBsonDocument>;
 begin
-  Result := TEnumerator.Create(FProtocol, FReadPreference, FDatabaseName, FCollectionName, FInitialPage, FInitialCursorId);
+  Result := TEnumerator.Create(FProtocol, FReadPreference, FDatabaseName, FCollectionName, FInitialBatch, FInitialCursorId);
 end;
 
 function TgoMongoCursor.ToArray: TArray<TgoBsonDocument>;
-var
-  Count, Capacity: Integer;
-  Doc: TgoBsonDocument;
 begin
-  Count := 0;
-  Capacity := 16;
-  SetLength(Result, Capacity);
-  for Doc in Self do
-  begin
-    if (Count >= Capacity) then
-    begin
-      Capacity := Capacity * 2;
-      SetLength(Result, Capacity);
-    end;
-    Result[Count] := Doc;
-    Inc(Count);
-  end;
+  var lRet: TArray<TgoBsonDocument>;
+  var lCount: Integer := 0;
+  var lCapacity := FInitialBatch.Count;
+  SetLength(lRet, lCapacity);
 
-  SetLength(Result, Count);
+  try
+    FetchAll(
+      procedure (ADoc: TgoBsonDocument)
+      begin
+        if (lCount >= lCapacity) then
+        begin
+          lCapacity := lCapacity shl 2;
+          SetLength(lRet, lCapacity);
+        end;
+        lRet[lCount] := ADoc;
+        Inc(lCount);
+      end);
+  finally
+    SetLength(lRet, lCount);
+    Result := lRet;
+  end;
 end;
 
 { TgoMongoCursor.TEnumerator }
@@ -1712,13 +1709,13 @@ begin
 end;
 
 constructor TgoMongoCursor.TEnumerator.Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference;
-const ADatabaseName, ACollectionName: string; const APage: TArray<TBytes>; const ACursorId: Int64);
+const ADatabaseName, ACollectionName: string; const AInitialBatch: TgoBsonArray; const ACursorId: Int64);
 begin
   inherited Create;
   FProtocol := AProtocol;
   FDatabaseName := ADatabaseName;
   FCollectionName := ACollectionName;
-  FPage := APage;
+  FBatch := AInitialBatch;
   FCursorId := ACursorId;
   FReadPreference := AReadPreference;
   FIndex := -1;
@@ -1755,15 +1752,15 @@ var
   Value: TgoBsonValue;
 begin
   Result := 0;
+
   // Enum initial doc first (batchsize can be differ. for example  == 1)
-  while (FIndex < (Length(FPage) - 1)) do
+  while (FIndex < (FBatch.Count - 1)) do
   begin
     Inc(FIndex);
     Inc(Result);
-    ARef(TgoBsonDocument.Load(FPage[FIndex]));
+    ARef(FBatch[FIndex].AsBsonDocument);
   end;
-  SetLength(FPage, 0);
-
+  FBatch.Clear;
 
   // Enum others using different batchsize and avoiding dynn-arrays (FPage) allocation and ToBSON+TgoBsonDocument.Load pair.
   while FCursorID <> NoCursorID do
@@ -1796,12 +1793,12 @@ end;
 
 function TgoMongoCursor.TEnumerator.DoGetCurrent: TgoBsonDocument;
 begin
-  Result := TgoBsonDocument.Load(FPage[FIndex]);
+  Result := FBatch[FIndex].AsBsonDocument;
 end;
 
 function TgoMongoCursor.TEnumerator.DoMoveNext: Boolean;
 begin
-  Result := (FIndex < (Length(FPage) - 1));
+  Result := (FIndex < FBatch.Count - 1);
   if Result then
     Inc(FIndex)
   else if (FCursorId <> NoCursorID) then
@@ -1810,7 +1807,7 @@ begin
       Note: if FCursorId = NoCursorID, then all documents did fit in the reply, so there
       is no need to get more data from the server. }
     GetMore;
-    Result := (FPage <> nil);
+    Result := (FBatch.Count > 0);
   end;
 end;
 
@@ -1818,43 +1815,39 @@ procedure TgoMongoCursor.TEnumerator.GetMore;
 var
   Reply: IgoMongoReply;
   Writer: IgoBsonWriter;
-  ADoc, Cursor: TgoBsonDocument;
-  Docs: TgoBsonArray;
-  Value: TgoBsonValue;
-  I: Integer;
 begin
+  // clear current batch data.
+  FIndex := 0;
+  FBatch.Clear;
+
+  // format request.
   Writer := TgoBsonWriter.Create;
   Writer.WriteStartDocument;
   Writer.WriteInt64('getMore', FCursorId);
   Writer.WriteString('collection', FCollectionName);
-  Writer.WriteInt32('batchSize', Length(FPage));
-  { MaxTimeMS }
+  Writer.WriteInt32('batchSize', FBatch.Count);
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
+
+  // query
   Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
   HandleTimeout(Reply);
-  FIndex := 0;
-  SetLength(FPage, 0);
-  ADoc := Reply.FirstDoc;
-  if not ADoc.IsNil then
+
+  // process reply.
+  var ADoc := Reply.FirstDoc;
+  if ADoc.IsNil or not ADoc.Contains('cursor') then
   begin
-    if ADoc.Contains('cursor') then
-    begin
-      Cursor := ADoc['cursor'].asBsonDocument;
-      // The cursor ID should become 0 when it is exhausted
-      FCursorId := Cursor['id']; // less overhead to do it here, than query reply.cursorid
-      // Namespace:=Cursor.Get('ns','').ToString();   --> does not change
-      Docs := Cursor['nextBatch'].AsBsonArray;
-      SetLength(FPage, Docs.Count);
-      I := 0;
-      for Value in Docs do
-      begin
-        FPage[I] := Value.asBsonDocument.ToBson;
-        Inc(I);
-      end;
-    end;
+    Exit;
   end;
+
+  var Cursor := ADoc['cursor'].asBsonDocument;
+
+  // The cursor ID should become 0 when it is exhausted
+  FCursorId := Cursor['id']; // less overhead to do it here, than query reply.cursorid
+
+  // Namespace:=Cursor.Get('ns','').ToString();   --> does not change
+  FBatch := Cursor['nextBatch'].AsBsonArray;
 end;
 
 { TgoMongoCollection }

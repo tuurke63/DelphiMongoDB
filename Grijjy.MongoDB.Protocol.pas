@@ -1209,7 +1209,6 @@ end;
 function TgoMongoProtocol.WaitForReply(const ARequestId: Integer; const AWaiterEvent: TEvent): IgoMongoReply;
 var
   Start, LastRecv: tStopWatch;
-  ms: Int64;
 begin
   result := nil;
 
