@@ -217,7 +217,7 @@ type
 
     { Returns a document that describes the role of the mongod instance. If the optional
       field saslSupportedMechs is specified, the command also returns an array of
-      SASL mechanisms used to create the specified user’s credentials.
+      SASL mechanisms used to create the specified user's credentials.
       If the instance is a member of a replica set, then isMaster returns a subset
       of the replica set configuration and status including whether or not the instance
       is the primary of the replica set.
@@ -612,8 +612,7 @@ type
     function FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort)
       : TgoBsonDocument; overload;
 
-    {
-      Finds and updates the first document matching the query.
+    { Finds and updates the first document matching the query.
 
       Parameters:
         AFilter: The selection criteria for the modification.
@@ -2131,10 +2130,11 @@ function TgoMongoCollection.FindAndModify(
   const AFilter: TgoMongoFilter; const ASort: TgoMongoSort; const AUpdate : TgoMongoUpdate;
   const AFields: TgoBsonDocument; const ARemove, ANew, AUpsert, ABypassDocumentValidation: Boolean;
   const AMaxTimeMS: Integer): TgoBsonDocument;
-// https://www.mongodb.com/docs/v7.0/reference/method/db.collection.findOneAndUpdate/
+// https://www.mongodb.com/docs/manual/reference/command/findAndModify/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
+  LastErrObj: TgoBsonDocument;
 begin
   Writer := TgoBsonWriter.Create;
 
@@ -2155,10 +2155,18 @@ begin
     Writer.WriteRawBsonDocument(ASort.ToBson);
   end;
 
-  if AUpdate.IsNil = false then
+  if (AUpdate.IsNil = false) and (ARemove = false) then
   begin
     Writer.WriteName('update');
     Writer.WriteRawBsonDocument(AUpdate.ToBson);
+    Writer.WriteName('new');
+    Writer.WriteBoolean(ANew);
+    Writer.WriteName('upsert');
+    Writer.WriteBoolean(AUpsert);
+  end else
+  begin
+    Writer.WriteName('remove');
+    Writer.WriteBoolean(ARemove);
   end;
 
   if AFields.IsNil = false then
@@ -2167,12 +2175,6 @@ begin
     Writer.WriteRawBsonDocument(AFields.ToBson);
   end;
 
-  Writer.WriteName('remove');
-  Writer.WriteBoolean(ARemove);
-  Writer.WriteName('new');
-  Writer.WriteBoolean(ANew);
-  Writer.WriteName('upsert');
-  Writer.WriteBoolean(AUpsert);
   Writer.WriteName('bypassDocumentValidation');
   Writer.WriteBoolean(ABypassDocumentValidation);
   Writer.WriteName('maxTimeMS');
@@ -2183,6 +2185,12 @@ begin
   Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
   HandleCommandReply(Reply);
   Result := Reply.FirstDoc;
+
+  LastErrObj := Result.Get('lastErrorObject','').ToBsonDocument;
+
+  if (LastErrObj.Get('n',0).AsInteger > 0) and (LastErrObj.Get('ok',true).ToBoolean = true)
+    then Result := Result.Get('value','').ToBsonDocument
+    else Result.SetNil;
 end;
 
 function TgoMongoCollection.InsertMany(const ADocuments: array of TgoBsonDocument; const AOrdered: Boolean): Integer;
