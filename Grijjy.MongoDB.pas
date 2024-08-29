@@ -6,11 +6,7 @@ unit Grijjy.MongoDB;
 interface
 
 uses
-  System.SysUtils,
-  System.Generics.Collections,
-  Grijjy.Bson,
-  Grijjy.Bson.IO,
-  Grijjy.MongoDB.Protocol,
+  System.SysUtils, system.SyncObjs, System.Generics.Collections, Grijjy.Bson, Grijjy.Bson.IO, Grijjy.MongoDB.Protocol,
   Grijjy.MongoDB.Queries;
 
 type
@@ -118,68 +114,70 @@ const
 
   { MongoDB collation default settings
     https://docs.mongodb.com/manual/reference/collation-locales-defaults/#collation-languages-locales }
-  DEFAULTTGOMONGOCOLLATION: TgoMongoCollation = (Locale: 'en'; CaseLevel: false; CaseFirst: TgoMongoCollationCaseFirst.ccfOff; Strength: 1;
-    NumericOrdering: false; Alternate: TgoMongoCollationAlternate.caNonIgnorable; MaxVariable: TgoMongoCollationMaxVariable.cmvSpace;
-    Backwards: false;);
+  DEFAULTTGOMONGOCOLLATION: TgoMongoCollation = (
+    Locale: 'en';
+    CaseLevel: false;
+    CaseFirst: TgoMongoCollationCaseFirst.ccfOff;
+    Strength: 1;
+    NumericOrdering: false;
+    Alternate: TgoMongoCollationAlternate.caNonIgnorable;
+    MaxVariable: TgoMongoCollationMaxVariable.cmvSpace;
+    Backwards: false;
+  );
 
 type
   { MongoDB error codes }
   TgoMongoErrorCode = (OK = 0, InternalError = 1, BadValue = 2, OBSOLETE_DuplicateKey = 3, NoSuchKey = 4, GraphContainsCycle = 5,
     HostUnreachable = 6, HostNotFound = 7, UnknownError = 8, FailedToParse = 9, CannotMutateObject = 10, UserNotFound = 11,
     UnsupportedFormat = 12, Unauthorized = 13, TypeMismatch = 14, Overflow = 15, InvalidLength = 16, ProtocolError = 17,
-    AuthenticationFailed = 18, CannotReuseObject = 19, IllegalOperation = 20, EmptyArrayOperation = 21, InvalidBSON = 22,
-    AlreadyInitialized = 23, LockTimeout = 24, RemoteValidationError = 25, NamespaceNotFound = 26, IndexNotFound = 27, PathNotViable = 28,
-    NonExistentPath = 29, InvalidPath = 30, RoleNotFound = 31, RolesNotRelated = 32, PrivilegeNotFound = 33, CannotBackfillArray = 34,
-    UserModificationFailed = 35, RemoteChangeDetected = 36, FileRenameFailed = 37, FileNotOpen = 38, FileStreamFailed = 39,
-    ConflictingUpdateOperators = 40, FileAlreadyOpen = 41, LogWriteFailed = 42, CursorNotFound = 43, UserDataInconsistent = 45,
-    LockBusy = 46, NoMatchingDocument = 47, NamespaceExists = 48, InvalidRoleModification = 49, ExceededTimeLimit = 50,
-    ManualInterventionRequired = 51, DollarPrefixedFieldName = 52, InvalidIdField = 53, NotSingleValueField = 54, InvalidDBRef = 55,
-    EmptyFieldName = 56, DottedFieldName = 57, RoleModificationFailed = 58, CommandNotFound = 59, OBSOLETE_DatabaseNotFound = 60,
-    ShardKeyNotFound = 61, OplogOperationUnsupported = 62, StaleShardVersion = 63, WriteConcernFailed = 64, MultipleErrorsOccurred = 65,
-    ImmutableField = 66, CannotCreateIndex = 67, IndexAlreadyExists = 68, AuthSchemaIncompatible = 69, ShardNotFound = 70,
-    ReplicaSetNotFound = 71, InvalidOptions = 72, InvalidNamespace = 73, NodeNotFound = 74, WriteConcernLegacyOK = 75,
-    NoReplicationEnabled = 76, OperationIncomplete = 77, CommandResultSchemaViolation = 78, UnknownReplWriteConcern = 79,
-    RoleDataInconsistent = 80, NoMatchParseContext = 81, NoProgressMade = 82, RemoteResultsUnavailable = 83, DuplicateKeyValue = 84,
-    IndexOptionsConflict = 85, IndexKeySpecsConflict = 86, CannotSplit = 87, SplitFailed_OBSOLETE = 88, NetworkTimeout = 89,
-    CallbackCanceled = 90, ShutdownInProgress = 91, SecondaryAheadOfPrimary = 92, InvalidReplicaSetConfig = 93, NotYetInitialized = 94,
-    NotSecondary = 95, OperationFailed = 96, NoProjectionFound = 97, DBPathInUse = 98, CannotSatisfyWriteConcern = 100,
-    OutdatedClient = 101, IncompatibleAuditMetadata = 102, NewReplicaSetConfigurationIncompatible = 103, NodeNotElectable = 104,
+    AuthenticationFailed = 18, CannotReuseObject = 19, IllegalOperation = 20, EmptyArrayOperation = 21, InvalidBSON = 22, AlreadyInitialized
+    = 23, LockTimeout = 24, RemoteValidationError = 25, NamespaceNotFound = 26, IndexNotFound = 27, PathNotViable = 28, NonExistentPath = 29,
+    InvalidPath = 30, RoleNotFound = 31, RolesNotRelated = 32, PrivilegeNotFound = 33, CannotBackfillArray = 34, UserModificationFailed = 35,
+    RemoteChangeDetected = 36, FileRenameFailed = 37, FileNotOpen = 38, FileStreamFailed = 39, ConflictingUpdateOperators = 40,
+    FileAlreadyOpen = 41, LogWriteFailed = 42, CursorNotFound = 43, UserDataInconsistent = 45, LockBusy = 46, NoMatchingDocument = 47,
+    NamespaceExists = 48, InvalidRoleModification = 49, ExceededTimeLimit = 50, ManualInterventionRequired = 51, DollarPrefixedFieldName =
+    52, InvalidIdField = 53, NotSingleValueField = 54, InvalidDBRef = 55, EmptyFieldName = 56, DottedFieldName = 57, RoleModificationFailed
+    = 58, CommandNotFound = 59, OBSOLETE_DatabaseNotFound = 60, ShardKeyNotFound = 61, OplogOperationUnsupported = 62, StaleShardVersion =
+    63, WriteConcernFailed = 64, MultipleErrorsOccurred = 65, ImmutableField = 66, CannotCreateIndex = 67, IndexAlreadyExists = 68,
+    AuthSchemaIncompatible = 69, ShardNotFound = 70, ReplicaSetNotFound = 71, InvalidOptions = 72, InvalidNamespace = 73, NodeNotFound = 74,
+    WriteConcernLegacyOK = 75, NoReplicationEnabled = 76, OperationIncomplete = 77, CommandResultSchemaViolation = 78,
+    UnknownReplWriteConcern = 79, RoleDataInconsistent = 80, NoMatchParseContext = 81, NoProgressMade = 82, RemoteResultsUnavailable = 83,
+    DuplicateKeyValue = 84, IndexOptionsConflict = 85, IndexKeySpecsConflict = 86, CannotSplit = 87, SplitFailed_OBSOLETE = 88,
+    NetworkTimeout = 89, CallbackCanceled = 90, ShutdownInProgress = 91, SecondaryAheadOfPrimary = 92, InvalidReplicaSetConfig = 93,
+    NotYetInitialized = 94, NotSecondary = 95, OperationFailed = 96, NoProjectionFound = 97, DBPathInUse = 98, CannotSatisfyWriteConcern =
+    100, OutdatedClient = 101, IncompatibleAuditMetadata = 102, NewReplicaSetConfigurationIncompatible = 103, NodeNotElectable = 104,
     IncompatibleShardingMetadata = 105, DistributedClockSkewed = 106, LockFailed = 107, InconsistentReplicaSetNames = 108,
-    ConfigurationInProgress = 109, CannotInitializeNodeWithData = 110, NotExactValueField = 111, WriteConflict = 112,
-    InitialSyncFailure = 113, InitialSyncOplogSourceMissing = 114, CommandNotSupported = 115, DocTooLargeForCapped = 116,
-    ConflictingOperationInProgress = 117, NamespaceNotSharded = 118, InvalidSyncSource = 119, OplogStartMissing = 120,
-    DocumentValidationFailure = 121, OBSOLETE_ReadAfterOptimeTimeout = 122, NotAReplicaSet = 123, IncompatibleElectionProtocol = 124,
-    CommandFailed = 125, RPCProtocolNegotiationFailed = 126, UnrecoverableRollbackError = 127, LockNotFound = 128,
-    LockStateChangeFailed = 129, SymbolNotFound = 130, RLPInitializationFailed = 131, OBSOLETE_ConfigServersInconsistent = 132,
-    FailedToSatisfyReadPreference = 133, ReadConcernMajorityNotAvailableYet = 134, StaleTerm = 135, CappedPositionLost = 136,
-    IncompatibleShardingConfigVersion = 137, RemoteOplogStale = 138, JSInterpreterFailure = 139, InvalidSSLConfiguration = 140,
-    SSLHandshakeFailed = 141, JSUncatchableError = 142, CursorInUse = 143, IncompatibleCatalogManager = 144, PooledConnectionsDropped = 145,
-    ExceededMemoryLimit = 146, ZLibError = 147, ReadConcernMajorityNotEnabled = 148, NoConfigMaster = 149, StaleEpoch = 150,
-    OperationCannotBeBatched = 151, OplogOutOfOrder = 152, ChunkTooBig = 153, InconsistentShardIdentity = 154,
-    CannotApplyOplogWhilePrimary = 155, NeedsDocumentMove = 156, CanRepairToDowngrade = 157, MustUpgrade = 158, DurationOverflow = 159,
-    MaxStalenessOutOfRange = 160, IncompatibleCollationVersion = 161, CollectionIsEmpty = 162, ZoneStillInUse = 163,
-    InitialSyncActive = 164, ViewDepthLimitExceeded = 165, CommandNotSupportedOnView = 166, OptionNotSupportedOnView = 167,
-    InvalidPipelineOperator = 168, CommandOnShardedViewNotSupportedOnMongod = 169, TooManyMatchingDocuments = 170,
-    CannotIndexParallelArrays = 171, TransportSessionClosed = 172, TransportSessionNotFound = 173, TransportSessionUnknown = 174,
-    QueryPlanKilled = 175, FileOpenFailed = 176, ZoneNotFound = 177, RangeOverlapConflict = 178, WindowsPdhError = 179,
-    BadPerfCounterPath = 180, AmbiguousIndexKeyPattern = 181, InvalidViewDefinition = 182, ClientMetadataMissingField = 183,
-    ClientMetadataAppNameTooLarge = 184, ClientMetadataDocumentTooLarge = 185, ClientMetadataCannotBeMutated = 186,
-    LinearizableReadConcernError = 187, IncompatibleServerVersion = 188, PrimarySteppedDown = 189, MasterSlaveConnectionFailure = 190,
-    OBSOLETE_BalancerLostDistributedLock = 191, FailPointEnabled = 192, NoShardingEnabled = 193, BalancerInterrupted = 194,
-    ViewPipelineMaxSizeExceeded = 195, InvalidIndexSpecificationOption = 197, OBSOLETE_ReceivedOpReplyMessage = 198,
-    ReplicaSetMonitorRemoved = 199, ChunkRangeCleanupPending = 200, CannotBuildIndexKeys = 201, NetworkInterfaceExceededTimeLimit = 202,
-    ShardingStateNotInitialized = 203, TimeProofMismatch = 204, ClusterTimeFailsRateLimiter = 205, NoSuchSession = 206, InvalidUUID = 207,
-    TooManyLocks = 208, StaleClusterTime = 209, CannotVerifyAndSignLogicalTime = 210, KeyNotFound = 211,
-    IncompatibleRollbackAlgorithm = 212, DuplicateSession = 213, AuthenticationRestrictionUnmet = 214, DatabaseDropPending = 215,
-    ElectionInProgress = 216, IncompleteTransactionHistory = 217, UpdateOperationFailed = 218, FTDCPathNotSet = 219,
-    FTDCPathAlreadySet = 220, IndexModified = 221, CloseChangeStream = 222, IllegalOpMsgFlag = 223, JSONSchemaNotAllowed = 224,
-    TransactionTooOld = 225,
-
-    SocketException = 9001, OBSOLETE_RecvStaleConfig = 9996, NotMaster = 10107, CannotGrowDocumentInCappedNamespace = 10003,
-    DuplicateKey = 11000, InterruptedAtShutdown = 11600, Interrupted = 11601, InterruptedDueToReplStateChange = 11602,
-    OutOfDiskSpace = 14031, KeyTooLong = 17280, BackgroundOperationInProgressForDatabase = 12586,
-    BackgroundOperationInProgressForNamespace = 12587, NotMasterOrSecondary = 13436, NotMasterNoSlaveOk = 13435, ShardKeyTooBig = 13334,
-    StaleConfig = 13388, DatabaseDifferCase = 13297, OBSOLETE_PrepareConfigsFailed = 13104);
+    ConfigurationInProgress = 109, CannotInitializeNodeWithData = 110, NotExactValueField = 111, WriteConflict = 112, InitialSyncFailure =
+    113, InitialSyncOplogSourceMissing = 114, CommandNotSupported = 115, DocTooLargeForCapped = 116, ConflictingOperationInProgress = 117,
+    NamespaceNotSharded = 118, InvalidSyncSource = 119, OplogStartMissing = 120, DocumentValidationFailure = 121,
+    OBSOLETE_ReadAfterOptimeTimeout = 122, NotAReplicaSet = 123, IncompatibleElectionProtocol = 124, CommandFailed = 125,
+    RPCProtocolNegotiationFailed = 126, UnrecoverableRollbackError = 127, LockNotFound = 128, LockStateChangeFailed = 129, SymbolNotFound =
+    130, RLPInitializationFailed = 131, OBSOLETE_ConfigServersInconsistent = 132, FailedToSatisfyReadPreference = 133,
+    ReadConcernMajorityNotAvailableYet = 134, StaleTerm = 135, CappedPositionLost = 136, IncompatibleShardingConfigVersion = 137,
+    RemoteOplogStale = 138, JSInterpreterFailure = 139, InvalidSSLConfiguration = 140, SSLHandshakeFailed = 141, JSUncatchableError = 142,
+    CursorInUse = 143, IncompatibleCatalogManager = 144, PooledConnectionsDropped = 145, ExceededMemoryLimit = 146, ZLibError = 147,
+    ReadConcernMajorityNotEnabled = 148, NoConfigMaster = 149, StaleEpoch = 150, OperationCannotBeBatched = 151, OplogOutOfOrder = 152,
+    ChunkTooBig = 153, InconsistentShardIdentity = 154, CannotApplyOplogWhilePrimary = 155, NeedsDocumentMove = 156, CanRepairToDowngrade =
+    157, MustUpgrade = 158, DurationOverflow = 159, MaxStalenessOutOfRange = 160, IncompatibleCollationVersion = 161, CollectionIsEmpty =
+    162, ZoneStillInUse = 163, InitialSyncActive = 164, ViewDepthLimitExceeded = 165, CommandNotSupportedOnView = 166,
+    OptionNotSupportedOnView = 167, InvalidPipelineOperator = 168, CommandOnShardedViewNotSupportedOnMongod = 169, TooManyMatchingDocuments
+    = 170, CannotIndexParallelArrays = 171, TransportSessionClosed = 172, TransportSessionNotFound = 173, TransportSessionUnknown = 174,
+    QueryPlanKilled = 175, FileOpenFailed = 176, ZoneNotFound = 177, RangeOverlapConflict = 178, WindowsPdhError = 179, BadPerfCounterPath =
+    180, AmbiguousIndexKeyPattern = 181, InvalidViewDefinition = 182, ClientMetadataMissingField = 183, ClientMetadataAppNameTooLarge = 184,
+    ClientMetadataDocumentTooLarge = 185, ClientMetadataCannotBeMutated = 186, LinearizableReadConcernError = 187, IncompatibleServerVersion
+    = 188, PrimarySteppedDown = 189, MasterSlaveConnectionFailure = 190, OBSOLETE_BalancerLostDistributedLock = 191, FailPointEnabled = 192,
+    NoShardingEnabled = 193, BalancerInterrupted = 194, ViewPipelineMaxSizeExceeded = 195, InvalidIndexSpecificationOption = 197,
+    OBSOLETE_ReceivedOpReplyMessage = 198, ReplicaSetMonitorRemoved = 199, ChunkRangeCleanupPending = 200, CannotBuildIndexKeys = 201,
+    NetworkInterfaceExceededTimeLimit = 202, ShardingStateNotInitialized = 203, TimeProofMismatch = 204, ClusterTimeFailsRateLimiter = 205,
+    NoSuchSession = 206, InvalidUUID = 207, TooManyLocks = 208, StaleClusterTime = 209, CannotVerifyAndSignLogicalTime = 210, KeyNotFound =
+    211, IncompatibleRollbackAlgorithm = 212, DuplicateSession = 213, AuthenticationRestrictionUnmet = 214, DatabaseDropPending = 215,
+    ElectionInProgress = 216, IncompleteTransactionHistory = 217, UpdateOperationFailed = 218, FTDCPathNotSet = 219, FTDCPathAlreadySet =
+    220, IndexModified = 221, CloseChangeStream = 222, IllegalOpMsgFlag = 223, JSONSchemaNotAllowed = 224, TransactionTooOld = 225,
+    SocketException = 9001, OBSOLETE_RecvStaleConfig = 9996, NotMaster = 10107, CannotGrowDocumentInCappedNamespace = 10003, DuplicateKey =
+    11000, InterruptedAtShutdown = 11600, Interrupted = 11601, InterruptedDueToReplStateChange = 11602, OutOfDiskSpace = 14031, KeyTooLong =
+    17280, BackgroundOperationInProgressForDatabase = 12586, BackgroundOperationInProgressForNamespace = 12587, NotMasterOrSecondary = 13436,
+    NotMasterNoSlaveOk = 13435, ShardKeyTooBig = 13334, StaleConfig = 13388, DatabaseDifferCase = 13297, OBSOLETE_PrepareConfigsFailed =
+    13104);
 
 type
   { Is raised when there is an error writing to the database }
@@ -197,8 +195,11 @@ type
 type
   { Forward declarations }
   IgoMongoDatabase = interface;
+
   IgoMongoCollection = interface;
+
   igoMongoCursor = interface;
+
   tWriteCmd = Reference to procedure(Writer: IgoBsonWriter);
 
   { The client interface to MongoDB.
@@ -225,6 +226,7 @@ type
       described here:
       https://docs.mongodb.com/manual/reference/command/isMaster/
  }
+    function GetProtocol: tgoMongoProtocol;
     function GetInstanceInfo(const ASaslSupportedMechs: string = ''; const AComment: string = ''): TgoMongoInstanceInfo;
     function IsMaster: Boolean;
 
@@ -248,6 +250,7 @@ type
       Parameters:
       AName: The name of the database to drop. }
     procedure DropDatabase(const AName: string);
+    function getAvailable: Boolean;
     { Gets a database.
 
       Parameters:
@@ -263,11 +266,17 @@ type
       querying it. }
     function GetDatabase(const AName: string): IgoMongoDatabase;
     function GetGlobalReadPreference: tgoMongoReadPreference;
+    function getPooled: Boolean;
+    procedure ReleaseToPool;
+    procedure setAvailable(const Value: Boolean);
     procedure SetGlobalReadPreference(const Value: tgoMongoReadPreference);
-
+    procedure setPooled(const Value: Boolean);
+    property Available: Boolean read getAvailable write setAvailable;
     { GlobalReadPreference sets the global ReadPreference for all objects (database, collection etc)
       that do not have an individual specific ReadPreference. }
     property GlobalReadPreference: tgoMongoReadPreference read GetGlobalReadPreference write SetGlobalReadPreference;
+    property Pooled: Boolean read getPooled write setPooled;
+    property Protocol: tgoMongoProtocol read GetProtocol;
   end;
 
   { Represents a database in MongoDB.
@@ -314,9 +323,9 @@ type
 
       All parameters are described here:
       https://docs.mongodb.com/manual/reference/command/create/ }
-    function CreateCollection(const AName: string; const ACapped: Boolean; const AMaxSize: Int64; const AMaxDocuments: Int64;
-      const AValidationLevel: TgoMongoValidationLevel; const AValidationAction: TgoMongoValidationAction; const AValidator: TgoBsonDocument;
-      const ACollation: TgoMongoCollation): Boolean;
+    function CreateCollection(const AName: string; const ACapped: Boolean; const AMaxSize: Int64; const AMaxDocuments: Int64; const
+      AValidationLevel: TgoMongoValidationLevel; const AValidationAction: TgoMongoValidationAction; const AValidator: TgoBsonDocument; const
+      ACollation: TgoMongoCollation): Boolean;
 
     { Rename a collection.
 
@@ -336,17 +345,21 @@ type
     { Issue a command against the database that returns a cursor.
       Similar to AdminCommand. }
     function Command(CommandToIssue: tWriteCmd): igoMongoCursor;
-
     function GetReadPreference: tgoMongoReadPreference;
     procedure SetReadPreference(const Value: tgoMongoReadPreference);
 
     { The client used for this database. }
     property Client: IgoMongoClient read _GetClient;
 
+    {Returns the protocol of the CLIENT}
+    function GetProtocol: tgoMongoProtocol;
+
+
     { The name of the database. }
     property name: string read _GetName;
     { setting ReadPreference on the database will override the global readpreference }
     property ReadPreference: tgoMongoReadPreference read GetReadPreference write SetReadPreference;
+    property Protocol: tgoMongoProtocol read GetProtocol;
   end;
 
   { Represents a cursor to the documents returned from one of the
@@ -441,7 +454,6 @@ type
     function asJson: string;
     procedure fromBson(aBson: TgoBsonDocument);
     procedure fromJson(const aJson: string);
-
   end;
 
   { Represents a collection in a MongoDB database.
@@ -540,8 +552,8 @@ type
       The number of documents that match the filter. The number of documents
       that is actually updated may be less than this in case an update did
       not result in the change of one or more documents. }
-    function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false;
-      const AOrdered: Boolean = True): Integer;
+    function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false; const AOrdered:
+      Boolean = True): Integer;
 
     { Finds the documents matching the filter.
 
@@ -576,8 +588,8 @@ type
     function Find(const AProjection: TgoMongoProjection): igoMongoCursor; overload;
     function Find(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection): igoMongoCursor; overload;
     function Find(const AFilter: tgoMongoFilter; const ASort: TgoMongoSort): igoMongoCursor; overload;
-    function Find(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort; aSkip: Integer = 0)
-      : igoMongoCursor; overload;
+    function Find(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort; aSkip: Integer = 0):
+      igoMongoCursor; overload;
 
     { Finds the first document matching the filter.
 
@@ -609,8 +621,8 @@ type
     function FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection): TgoBsonDocument; overload;
     function FindOne(const AFilter: tgoMongoFilter): TgoBsonDocument; overload;
     function FindOne(const AFilter: tgoMongoFilter; const ASort: TgoMongoSort): TgoBsonDocument; overload;
-    function FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort)
-      : TgoBsonDocument; overload;
+    function FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort): TgoBsonDocument;
+      overload;
 
     { Counts the number of documents matching the filter.
 
@@ -649,8 +661,8 @@ type
 
       Returns:
       Created or not. }
-    function CreateTextIndex(const AName: string; const AFields: array of string; const ALanguageOverwriteField: string = '';
-      const ADefaultLanguage: string = 'en'): Boolean;
+    function CreateTextIndex(const AName: string; const AFields: array of string; const ALanguageOverwriteField: string = ''; const
+      ADefaultLanguage: string = 'en'): Boolean;
 
     { Drops an index in the current collection.
 
@@ -674,6 +686,10 @@ type
     function GetReadPreference: tgoMongoReadPreference;
     procedure SetReadPreference(const Value: tgoMongoReadPreference);
 
+    {Returns the protocol of database.CLIENT}
+    function GetProtocol: tgoMongoProtocol;
+
+
     { The database that contains this collection. }
     property Database: IgoMongoDatabase read _GetDatabase;
 
@@ -682,6 +698,7 @@ type
 
     { setting ReadPreference on the collection will override the global readpreference }
     property ReadPreference: tgoMongoReadPreference read GetReadPreference write SetReadPreference;
+    property Protocol: tgoMongoProtocol read GetProtocol;
   end;
 
 type
@@ -695,34 +712,34 @@ type
 
     { Timeout waiting for partial or complete reply events, in milliseconds.
       Defaults to 5000 (5 seconds) }
-    ReplyTimeout: Integer;
+      ReplyTimeout: Integer;
 
     { Default query flags }
-    QueryFlags: TgoMongoQueryFlags;
+      QueryFlags: TgoMongoQueryFlags;
 
     { Tls enabled }
-    Secure: Boolean;
+      Secure: Boolean;
 
     { X.509 Certificate in PEM format, if any }
-    Certificate: TBytes;
+      Certificate: TBytes;
 
     { X.509 Private key in PEM format, if any }
-    PrivateKey: TBytes;
+      PrivateKey: TBytes;
 
     { Password for private key, optional }
-    PrivateKeyPassword: string;
+      PrivateKeyPassword: string;
 
     { Authentication mechanism }
-    AuthMechanism: TgoMongoAuthMechanism;
+      AuthMechanism: TgoMongoAuthMechanism;
 
     { Authentication database }
-    AuthDatabase: string;
+      AuthDatabase: string;
 
     { Authentication username }
-    Username: string;
+      Username: string;
 
     { Authentication password }
-    Password: string;
+      Password: string;
 
     ApplicationName: string;
 
@@ -739,16 +756,24 @@ type
   { Implements IgoMongoClient.
     This is the main entry point to the MongoDB API. }
   TgoMongoClient = class(TInterfacedObject, IgoMongoClient)
-  public const
+  public
+    const
     { Default host address of the MongoDB server. }
-    DEFAULT_HOST = 'localhost';
+      DEFAULT_HOST = 'localhost';
     { Default connection port. }
-    DEFAULT_PORT = 27017;
+      DEFAULT_PORT = 27017;
 {$REGION 'Internal Declarations'}
   private
     FProtocol: TgoMongoProtocol;
+    fAvailable: Boolean;
+    fPooled: Boolean;
     function GetGlobalReadPreference: tgoMongoReadPreference;
     procedure SetGlobalReadPreference(const Value: tgoMongoReadPreference);
+    function GetProtocol: TgoMongoProtocol;
+    function getAvailable: Boolean;
+    function getPooled: Boolean;
+    procedure setAvailable(const Value: Boolean);
+    procedure setPooled(const Value: Boolean);
   protected
     { IgoMongoClient }
     function ListDatabaseNames: TArray<string>;
@@ -763,8 +788,9 @@ type
     function HostInfo: TgoBsonDocument;
     function Features: TgoBsonDocument;
     function Hello: TgoBsonDocument;
+    procedure ReleaseToPool;
   protected
-    property Protocol: TgoMongoProtocol read FProtocol;
+
 {$ENDREGION 'Internal Declarations'}
   public
     { Creates a client interface to MongoDB.
@@ -782,9 +808,41 @@ type
     constructor Create(const ASettings: TgoMongoClientSettings); overload;
     destructor Destroy; override;
 
+
     { GlobalReadPreference sets the global ReadPreference for all objects (database, collection etc)
       that do not have an individual specific ReadPreference. }
     property GlobalReadPreference: tgoMongoReadPreference read GetGlobalReadPreference write SetGlobalReadPreference;
+    property Pooled: Boolean read getPooled write setPooled;   //Client is inside a connection pool
+    property Available: Boolean read getAvailable write setAvailable; //Client is available (not in use)
+    property Protocol: TgoMongoProtocol read GetProtocol;
+  end;
+
+
+
+
+  {tgoConnectionPool is a connection pool of client connections,
+   intended for a multi-tasking environment where worker threads
+   may temporarily need connections and where it is advantageous
+   (performance-wise and latency-wise) to re-use existing connections
+   instead of having to establish new ones: The whole connection
+   sequence is skipped if the client is already connected.}
+
+  tgoConnectionPool = class(tlist<igoMongoClient>)
+  private
+    flock: tCriticalSection;
+    fHost: string;
+    fPort: integer;
+    fSettings: tgoMongoClientSettings;
+    fMaxitems: integer;
+  public
+    function GetAvailableClient: igoMongoClient; //grabs an available client connection from the pool.
+    procedure ReleaseToPool(const Client: igoMongoClient);//Releases the connection back to the pool
+
+    procedure Purge; //Deletes currently unused connections
+    procedure AddToPool(const Client: igoMongoClient);
+
+    constructor Create(const AHost: string; APort: Integer; const ASettings: tgoMongoClientSettings; aMaxitems: integer);
+    destructor Destroy; override;
   end;
 
 resourcestring
@@ -802,6 +860,9 @@ const
   NoCursorID = 0;
 
 {$POINTERMATH ON}
+
+
+
 
 { If no reply was received within timeout seconds, throw an exception }
 procedure HandleTimeout(const AReply: IgoMongoReply); inline;
@@ -874,91 +935,6 @@ begin
   end;
 end;
 
-type
-  { Implements IgoMongoDatabase }
-  TgoMongoDatabase = class(TInterfacedObject, IgoMongoDatabase)
-{$REGION 'Internal Declarations'}
-  private
-    FClient: IgoMongoClient;
-    FProtocol: TgoMongoProtocol; // Reference
-    FName: string;
-    FReadPreference: tgoMongoReadPreference;
-    function GetReadPreference: tgoMongoReadPreference;
-    procedure SetReadPreference(const Value: tgoMongoReadPreference);
-    procedure SpecifyDB(const AWriter: IgoBsonWriter);
-    procedure SpecifyReadPreference(const AWriter: IgoBsonWriter);
-  protected
-    { IgoMongoDatabase }
-    function _GetClient: IgoMongoClient;
-    function _GetName: string;
-    function ListCollectionNames: TArray<string>;
-    function ListCollections: TArray<TgoBsonDocument>;
-    procedure DropCollection(const AName: string);
-    function GetCollection(const AName: string): IgoMongoCollection;
-    function CreateCollection(const AName: string; const ACapped: Boolean; const AMaxSize: Int64; const AMaxDocuments: Int64;
-      const AValidationLevel: TgoMongoValidationLevel; const AValidationAction: TgoMongoValidationAction; const AValidator: TgoBsonDocument;
-      const ACollation: TgoMongoCollation): Boolean;
-    function RenameCollection(const AFromNamespace, AToNamespace: string; const ADropTarget: Boolean = false): Boolean;
-    function GetDbStats(const AScale: Integer): TgoMongoStatistics;
-    function Command(CommandToIssue: tWriteCmd): igoMongoCursor;
-    function AdminCommand(CommandToIssue: tWriteCmd): igoMongoCursor;
-
-  protected
-    property Protocol: TgoMongoProtocol read FProtocol;
-    property name: string read FName;
-{$ENDREGION 'Internal Declarations'}
-  public
-    constructor Create(const AClient: TgoMongoClient; const AName: string);
-    property ReadPreference: tgoMongoReadPreference read GetReadPreference write SetReadPreference;
-  end;
-
-type
-  { Implements IgoMongoCursor }
-  TgoMongoCursor = class(TInterfacedObject, igoMongoCursor)
-{$REGION 'Internal Declarations'}
-  private type
-    TEnumerator = class(TEnumerator<TgoBsonDocument>)
-    private
-      FProtocol: TgoMongoProtocol; // Reference
-      FDatabaseName: string;
-      FCollectionName: string;
-      FPage: TArray<TBytes>;
-      FCursorId: Int64;
-      FIndex: Integer;
-      FReadPreference: tgoMongoReadPreference;
-    private
-      procedure GetMore;
-      procedure SpecifyDB(const Writer: IgoBsonWriter);
-      procedure SpecifyReadPreference(const AWriter: IgoBsonWriter);
-    protected
-      function DoGetCurrent: TgoBsonDocument; override;
-      function DoMoveNext: Boolean; override;
-    public
-      destructor Destroy; override;
-      constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference;
-        const ADatabaseName, ACollectionName: string; const APage: TArray<TBytes>; const ACursorId: Int64);
-    end;
-  private
-    FProtocol: TgoMongoProtocol; // Reference
-    FDatabaseName: string;
-    FCollectionName: string;
-    FInitialPage: TArray<TBytes>;
-    FInitialCursorId: Int64;
-    FReadPreference: tgoMongoReadPreference;
-  public
-    { IgoMongoCursor }
-    function GetEnumerator: TEnumerator<TgoBsonDocument>;
-    function ToArray: TArray<TgoBsonDocument>;
-  public
-    constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference;
-      const ADatabaseName, ACollectionName: string; const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64); overload;
-
-    constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const aNameSpace: string;
-      const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64); overload;
-
-{$ENDREGION 'Internal Declarations'}
-  end;
-
 procedure DoSpecifyReadPreference(AReadPreference: tgoMongoReadPreference; const AWriter: IgoBsonWriter);
 begin
   if AReadPreference <> tgoMongoReadPreference.Primary then
@@ -980,7 +956,206 @@ begin
   end;
 end;
 
-function HasCursor(const ADoc: TgoBsonDocument; var Cursor: TgoBsonDocument; var CursorID: Int64; var Namespace: string): Boolean; inline;
+type
+  {tgoCursorhelper can determine if a BSON DOC contains a cursor and create an igoMongoCursor from it}
+  tgoCursorhelper = class
+    class function HasCursor(const ADoc: TgoBsonDocument; var Cursor: TgoBsonDocument; var CursorID: Int64; var Namespace: string): Boolean;
+      inline;
+    class function CreateCursor(const ADoc: TgoBsonDocument; AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference):
+      igoMongoCursor;
+
+    class function ToDocArray(const aCursor: igoMongoCursor): TArray<TgoBsonDocument>;
+
+    class function ToBsonArray(const DocArray: TArray<TgoBsonDocument>):tgoBsonArray;   Overload;
+    class function ToBsonArray(const aCursor: igoMongoCursor):tgoBsonArray;   Overload;
+
+
+    class function FirstDoc(const Docs: tArray<tgoBsonDocument>): tgoBsonDocument;
+  end;
+
+
+  {tgoMongoCursor is a cursor engine. It implements a for ... in enumerator that automatically
+  retrieves the next batch of documents if its buffer is exhausted.}
+  TgoMongoCursor = class(TInterfacedObject, igoMongoCursor)
+{$REGION 'Internal Declarations'}
+  private
+    type
+      TEnumerator = class(TEnumerator<TgoBsonDocument>)
+      private
+        FProtocol: TgoMongoProtocol; // Reference
+        FDatabaseName: string;
+        FCollectionName: string;
+        FPage: TArray<TBytes>;
+        FCursorId: Int64;
+        FIndex: Integer;
+        FReadPreference: tgoMongoReadPreference;
+      private
+        procedure GetMore;
+        procedure SpecifyDB(const Writer: IgoBsonWriter);
+        procedure SpecifyReadPreference(const AWriter: IgoBsonWriter);
+      protected
+        function DoGetCurrent: TgoBsonDocument; override;
+        function DoMoveNext: Boolean; override;
+      public
+        destructor Destroy; override;
+        constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const ADatabaseName, ACollectionName:
+          string; const APage: TArray<TBytes>; const ACursorId: Int64);
+      end;
+  private
+    FProtocol: TgoMongoProtocol; // Reference
+    FDatabaseName: string;
+    FCollectionName: string;
+    FInitialPage: TArray<TBytes>;
+    FInitialCursorId: Int64;
+    FReadPreference: tgoMongoReadPreference;
+  public
+    { IgoMongoCursor }
+    function GetEnumerator: TEnumerator<TgoBsonDocument>;
+    function ToArray: TArray<TgoBsonDocument>;
+  public
+    constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const ADatabaseName, ACollectionName:
+      string; const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64); overload;
+
+    constructor Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const aNameSpace: string; const
+      AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64); overload;
+
+{$ENDREGION 'Internal Declarations'}
+  end;
+
+
+
+  {tgoMongoDatabase represents a database inside MongoDB.
+  It knows the name of the database and holds a reference
+  to igoMongoClient whose "protocol" it uses for communication}
+
+  TgoMongoDatabase = class(TInterfacedObject, IgoMongoDatabase)
+{$REGION 'Internal Declarations'}
+  private
+    FClient: IgoMongoClient;
+    FName: string;
+    FReadPreference: tgoMongoReadPreference;
+    function GetReadPreference: tgoMongoReadPreference;
+    procedure SetReadPreference(const Value: tgoMongoReadPreference);
+    procedure SpecifyDB(const AWriter: IgoBsonWriter);
+    procedure SpecifyReadPreference(const AWriter: IgoBsonWriter);
+    function GetProtocol: TgoMongoProtocol;
+  protected
+    { IgoMongoDatabase }
+    function _GetClient: IgoMongoClient;
+    function _GetName: string;
+    function ListCollectionNames: TArray<string>;
+    function ListCollections: TArray<TgoBsonDocument>;
+    procedure DropCollection(const AName: string);
+    function GetCollection(const AName: string): IgoMongoCollection;
+    function CreateCollection(const AName: string; const ACapped: Boolean; const AMaxSize: Int64; const AMaxDocuments: Int64; const
+      AValidationLevel: TgoMongoValidationLevel; const AValidationAction: TgoMongoValidationAction; const AValidator: TgoBsonDocument; const
+      ACollation: TgoMongoCollation): Boolean;
+    function RenameCollection(const AFromNamespace, AToNamespace: string; const ADropTarget: Boolean = false): Boolean;
+    function GetDbStats(const AScale: Integer): TgoMongoStatistics;
+    function Command(CommandToIssue: tWriteCmd): igoMongoCursor;
+    function AdminCommand(CommandToIssue: tWriteCmd): igoMongoCursor;
+  protected
+    property Protocol: TgoMongoProtocol read GetProtocol;
+    property name: string read FName;
+{$ENDREGION 'Internal Declarations'}
+  public
+    constructor Create(const AClient: TgoMongoClient; const AName: string);
+    property ReadPreference: tgoMongoReadPreference read GetReadPreference write SetReadPreference;
+  end;
+
+
+
+  {tgoMongoCollection represents a collection inside a database.
+  It knows the name of the collection and holds a reference to an
+  igoMongoDatabase}
+
+  TgoMongoCollection = class(TInterfacedObject, IgoMongoCollection)
+{$REGION 'Internal Declarations'}
+  private
+    type
+      PgoBsonDocument = ^TgoBsonDocument;
+  private
+    FDatabase: IgoMongoDatabase;
+    FName: string;
+    FReadPreference: tgoMongoReadPreference;
+  private
+    procedure AddWriteConcern(const AWriter: IgoBsonWriter);
+    procedure SpecifyDB(const AWriter: IgoBsonWriter);
+    procedure SpecifyReadPreference(const AWriter: IgoBsonWriter);
+
+    function InsertMany(const ADocuments: PgoBsonDocument; const ACount: Integer; const AOrdered: Boolean): Integer; overload;
+    function Delete(const AFilter: tgoMongoFilter; const AOrdered: Boolean; const ALimit: Integer): Integer;
+    function Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean): Integer;
+    function GetReadPreference: tgoMongoReadPreference;
+    procedure SetReadPreference(const Value: tgoMongoReadPreference);
+    function GetProtocol: tgoMongoProtocol;
+  protected
+    { IgoMongoCollection }
+    function _GetDatabase: IgoMongoDatabase;
+    function _GetName: string;
+
+    function InsertOne(const ADocument: TgoBsonDocument): Boolean;
+    function InsertMany(const ADocuments: array of TgoBsonDocument; const AOrdered: Boolean = True): Integer; overload;
+    function InsertMany(const ADocuments: TArray<TgoBsonDocument>; const AOrdered: Boolean = True): Integer; overload;
+    function InsertMany(const ADocuments: TEnumerable<TgoBsonDocument>; const AOrdered: Boolean = True): Integer; overload;
+
+    function DeleteOne(const AFilter: tgoMongoFilter): Boolean;
+    function DeleteMany(const AFilter: tgoMongoFilter; const AOrdered: Boolean = True): Integer;
+
+    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false): Boolean;
+    function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false; const AOrdered:
+      Boolean = True): Integer;
+    function EmptyCursor: igoMongoCursor;
+    function Find: igoMongoCursor; overload;
+    function Find(const AProjection: TgoMongoProjection): igoMongoCursor; overload;
+    function Find(const AFilter: tgoMongoFilter): igoMongoCursor; overload;
+    function Find(const AFilter: tgoMongoFilter; const ASort: TgoMongoSort): igoMongoCursor; overload;
+    function Find(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection): igoMongoCursor; overload;
+    function Find(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort; aSkip: Integer = 0):
+      igoMongoCursor; overload;
+
+    function Find(AOptions: igoMongoFindOptions): igoMongoCursor; overload;
+    function FindOne(AOptions: igoMongoFindOptions): TgoBsonDocument; overload;
+    function FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection): TgoBsonDocument; overload;
+    function FindOne(const AFilter: tgoMongoFilter): TgoBsonDocument; overload;
+    function FindOne(const AFilter: tgoMongoFilter; const ASort: TgoMongoSort): TgoBsonDocument; overload;
+    function FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort): TgoBsonDocument;
+      overload;
+
+    function Count: Integer; overload;
+    function Count(const AFilter: tgoMongoFilter): Integer; overload;
+
+    function CreateIndex(const AName: string; const AKeyFields: array of string; const AUnique: Boolean = false): Boolean;
+    function CreateTextIndex(const AName: string; const AFields: array of string; const ALanguageOverwriteField: string = ''; const
+      ADefaultLanguage: string = 'en'): Boolean;
+    function DropIndex(const AName: string): Boolean;
+    function ListIndexNames: TArray<string>;
+    function ListIndexes: TArray<TgoBsonDocument>;
+    function Stats: TgoBsonDocument;
+{$ENDREGION 'Internal Declarations'}
+  public
+    property Protocol: tgoMongoProtocol read GetProtocol;
+    property ReadPreference: tgoMongoReadPreference read GetReadPreference write SetReadPreference;
+    constructor Create(const ADatabase: TgoMongoDatabase; const AName: string);
+  end;
+
+//
+{$REGION 'EgoMongoDBWriteError'}
+
+constructor EgoMongoDBWriteError.Create(const AErrorCode: TgoMongoErrorCode; const AErrorMsg: string);
+begin
+  inherited Create(AErrorMsg + Format(' (error %d)', [Ord(AErrorCode)]));
+  FErrorCode := AErrorCode;
+end;
+
+
+{$ENDREGION}
+//
+{$REGION 'tgoCursorhelper'}
+
+  {hascursor determines if a BSON DOC contains a cursor}
+class function tgoCursorhelper.HasCursor(const ADoc: TgoBsonDocument; var Cursor: TgoBsonDocument; var CursorID: Int64; var Namespace:
+  string): Boolean;
 var
   temp: TgoBsonValue;
 begin
@@ -996,7 +1171,14 @@ begin
   end;
 end;
 
-function CreateCursor(const ADoc: TgoBsonDocument; AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference): igoMongoCursor;
+  {CreateCursor analyzes a BSON document and makes a cursor out of it.
+   If the doc is NIL, it  returns NIL
+   if the doc is empty, it returns an empty igoMongoCursor
+   If the doc contains just one document, it creates a igoMongoCursor that will return just this one document.
+   If the doc contains a "cursor" element, it will create a fully functional igoMongoCursor }
+
+class function tgoCursorhelper.CreateCursor(const ADoc: TgoBsonDocument; AProtocol: TgoMongoProtocol; AReadPreference:
+  tgoMongoReadPreference): igoMongoCursor;
 var
   Cursor: TgoBsonDocument;
   Value: TgoBsonValue;
@@ -1012,7 +1194,7 @@ begin
     begin
       if (Cursor.TryGetValue('firstBatch', Value)) then
       begin
-        // Note: The firstBatch array may be an empty resultset.
+          // Note: The firstBatch array may be an empty resultset.
         Docs := Value.AsBsonArray;
         SetLength(InitialPage, Docs.Count);
         for I := 0 to Docs.Count - 1 do
@@ -1029,98 +1211,222 @@ begin
   end
   else
   begin
-    // Empty Cursor
+      // Empty Cursor
     SetLength(InitialPage, 0);
     Result := TgoMongoCursor.Create(AProtocol, AReadPreference, 'null.null', InitialPage, NoCursorID);
   end;
 end;
 
-function ExhaustCursor(const aCursor: igoMongoCursor): TArray<TgoBsonDocument>;
+class function tgoCursorhelper.ToBsonArray(const DocArray: TArray<TgoBsonDocument>): tgoBsonArray;
+var i:integer;
 begin
-  Result := nil;
+{ TODO : UNTESTED }
+  result:=tgoBsonArray.Create(length(Docarray));
+  for i:=0 to high(docarray) do
+    result.add((docarray[i]));
+end;
+
+
+class function tgoCursorhelper.ToBsonArray(const aCursor: igoMongoCursor): tgoBsonArray;
+begin
+  Result:=ToBsonArray(ToDocArray(aCursor));
+end;
+
+{Fully exhausts a cursor and puts all elements into an array of docs}
+class function tgoCursorhelper.ToDocArray(const aCursor: igoMongoCursor): TArray<TgoBsonDocument>;
+begin
+  Setlength(Result, 0);
   if assigned(aCursor) then
     Result := aCursor.ToArray;
 end;
 
-type
-  { Implements IgoMongoCollection }
-  TgoMongoCollection = class(TInterfacedObject, IgoMongoCollection)
-{$REGION 'Internal Declarations'}
-  private type
-    PgoBsonDocument = ^TgoBsonDocument;
-  private
-    FDatabase: IgoMongoDatabase;
-    FProtocol: TgoMongoProtocol; // Reference
-    FName: string;
-    FReadPreference: tgoMongoReadPreference;
-  private
-    procedure AddWriteConcern(const AWriter: IgoBsonWriter);
-    procedure SpecifyDB(const AWriter: IgoBsonWriter);
-    procedure SpecifyReadPreference(const AWriter: IgoBsonWriter);
-
-    function InsertMany(const ADocuments: PgoBsonDocument; const ACount: Integer; const AOrdered: Boolean): Integer; overload;
-    function Delete(const AFilter: tgoMongoFilter; const AOrdered: Boolean; const ALimit: Integer): Integer;
-    function Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean): Integer;
-    function GetReadPreference: tgoMongoReadPreference;
-    procedure SetReadPreference(const Value: tgoMongoReadPreference);
-  protected
-    { IgoMongoCollection }
-    function _GetDatabase: IgoMongoDatabase;
-    function _GetName: string;
-
-    function InsertOne(const ADocument: TgoBsonDocument): Boolean;
-    function InsertMany(const ADocuments: array of TgoBsonDocument; const AOrdered: Boolean = True): Integer; overload;
-    function InsertMany(const ADocuments: TArray<TgoBsonDocument>; const AOrdered: Boolean = True): Integer; overload;
-    function InsertMany(const ADocuments: TEnumerable<TgoBsonDocument>; const AOrdered: Boolean = True): Integer; overload;
-
-    function DeleteOne(const AFilter: tgoMongoFilter): Boolean;
-    function DeleteMany(const AFilter: tgoMongoFilter; const AOrdered: Boolean = True): Integer;
-
-    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false): Boolean;
-    function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false;
-      const AOrdered: Boolean = True): Integer;
-    function EmptyCursor: igoMongoCursor;
-    function Find: igoMongoCursor; overload;
-    function Find(const AProjection: TgoMongoProjection): igoMongoCursor; overload;
-    function Find(const AFilter: tgoMongoFilter): igoMongoCursor; overload;
-    function Find(const AFilter: tgoMongoFilter; const ASort: TgoMongoSort): igoMongoCursor; overload;
-    function Find(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection): igoMongoCursor; overload;
-    function Find(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort; aSkip: Integer = 0)
-      : igoMongoCursor; overload;
-
-    function Find(AOptions: igoMongoFindOptions): igoMongoCursor; overload;
-    function FindOne(AOptions: igoMongoFindOptions): TgoBsonDocument; overload;
-    function FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection): TgoBsonDocument; overload;
-    function FindOne(const AFilter: tgoMongoFilter): TgoBsonDocument; overload;
-    function FindOne(const AFilter: tgoMongoFilter; const ASort: TgoMongoSort): TgoBsonDocument; overload;
-    function FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort)
-      : TgoBsonDocument; overload;
-
-    function Count: Integer; overload;
-    function Count(const AFilter: tgoMongoFilter): Integer; overload;
-
-    function CreateIndex(const AName: string; const AKeyFields: array of string; const AUnique: Boolean = false): Boolean;
-    function CreateTextIndex(const AName: string; const AFields: array of string; const ALanguageOverwriteField: string = '';
-      const ADefaultLanguage: string = 'en'): Boolean;
-    function DropIndex(const AName: string): Boolean;
-    function ListIndexNames: TArray<string>;
-    function ListIndexes: TArray<TgoBsonDocument>;
-    function Stats: TgoBsonDocument;
-{$ENDREGION 'Internal Declarations'}
-  public
-    property ReadPreference: tgoMongoReadPreference read GetReadPreference write SetReadPreference;
-    constructor Create(const ADatabase: TgoMongoDatabase; const AName: string);
-  end;
-
-  { EgoMongoDBWriteError }
-
-constructor EgoMongoDBWriteError.Create(const AErrorCode: TgoMongoErrorCode; const AErrorMsg: string);
+{Returns the first doc from an array. If the array is empty, it returns a NIL document}
+class function tgoCursorhelper.FirstDoc(const Docs: tArray<tgoBsonDocument>): tgoBsonDocument;
 begin
-  inherited Create(AErrorMsg + Format(' (error %d)', [Ord(AErrorCode)]));
-  FErrorCode := AErrorCode;
+  if length(Docs) > 0 then
+    result := Docs[0]
+  else
+    result.SetNil;
 end;
 
-{ TgoMongoClientSettings }
+
+{$ENDREGION}
+//
+{$REGION 'tgoMongoCursor (contains a tgoMongoProtocol reference to fetch new records)'}
+
+  { TgoMongoCursor }
+
+constructor TgoMongoCursor.Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const ADatabaseName,
+  ACollectionName: string; const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64);
+begin
+  inherited Create;
+  FProtocol := AProtocol;
+  FDatabaseName := ADatabaseName;
+  FCollectionName := ACollectionName;
+  FInitialPage := AInitialPage;
+  FInitialCursorId := AInitialCursorId;
+  FReadPreference := AReadPreference;
+end;
+
+constructor TgoMongoCursor.Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const aNameSpace: string;
+  const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64);
+var
+  dotpos: Integer;
+begin
+  inherited Create;
+  dotpos := Pos('.', aNameSpace);
+  FProtocol := AProtocol;
+  FDatabaseName := copy(aNameSpace, 1, dotpos - 1);
+  FCollectionName := copy(aNameSpace, dotpos + 1, Length(aNameSpace));
+  FInitialPage := AInitialPage;
+  FInitialCursorId := AInitialCursorId;
+  FReadPreference := AReadPreference;
+end;
+
+function TgoMongoCursor.GetEnumerator: TEnumerator<TgoBsonDocument>;
+begin
+  Result := TEnumerator.Create(FProtocol, FReadPreference, FDatabaseName, FCollectionName, FInitialPage, FInitialCursorId);
+end;
+
+function TgoMongoCursor.ToArray: TArray<TgoBsonDocument>;
+var
+  Count, Capacity: Integer;
+  Doc: TgoBsonDocument;
+begin
+  Count := 0;         //element size is sizeof(interface) =8 bytes in 64 bit mode
+  Capacity := 16;     //256 bytes in 64 bit mode
+  SetLength(Result, Capacity);
+  for Doc in Self do
+  begin
+    if (Count >= Capacity) then
+    begin
+      Capacity := Capacity * 2;       //there is exponential growth risk here
+      SetLength(Result, Capacity);
+    end;
+    Result[Count] := Doc;
+    Inc(Count);
+  end;
+
+  SetLength(Result, Count);//Truncate
+end;
+
+  { TgoMongoCursor.TEnumerator }
+
+procedure TgoMongoCursor.TEnumerator.SpecifyDB(const Writer: IgoBsonWriter);
+begin
+  Writer.WriteString('$db', FDatabaseName);
+end;
+
+procedure TgoMongoCursor.TEnumerator.SpecifyReadPreference(const AWriter: IgoBsonWriter);
+begin
+  DoSpecifyReadPreference(FReadPreference, AWriter);
+end;
+
+constructor TgoMongoCursor.TEnumerator.Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const
+  ADatabaseName, ACollectionName: string; const APage: TArray<TBytes>; const ACursorId: Int64);
+begin
+  inherited Create;
+  FProtocol := AProtocol;
+  FDatabaseName := ADatabaseName;
+  FCollectionName := ACollectionName;
+  FPage := APage;
+  FCursorId := ACursorId;
+  FReadPreference := AReadPreference;
+  FIndex := -1;
+end;
+
+destructor TgoMongoCursor.TEnumerator.Destroy;
+var
+  Writer: IgoBsonWriter;
+  Reply: IgoMongoReply;
+begin
+  if FCursorId <> 0 then // we exited the for...in loop before the cursor was exhausted
+  begin
+    try
+      Writer := TgoBsonWriter.Create;
+      Writer.WriteStartDocument;
+      Writer.WriteString('killCursors', FCollectionName);
+      Writer.WriteStartArray('cursors');
+      Writer.WriteInt64(FCursorId);
+      Writer.WriteEndArray;
+      SpecifyDB(Writer);
+      SpecifyReadPreference(Writer);
+      Writer.WriteEndDocument;
+        { "true" tells protocol to NOT expect a result - saves one roundtrip }
+      Reply := FProtocol.OpMsg(True, Writer.ToBson, nil, True);
+    except
+        // always ignore exceptions in a destructor!
+    end;
+  end;
+  inherited;
+end;
+
+function TgoMongoCursor.TEnumerator.DoGetCurrent: TgoBsonDocument;
+begin
+  Result := TgoBsonDocument.Load(FPage[FIndex]);
+end;
+
+function TgoMongoCursor.TEnumerator.DoMoveNext: Boolean;
+begin
+  Result := (FIndex < (Length(FPage) - 1));
+  if Result then
+    Inc(FIndex)
+  else if (FCursorId <> NoCursorID) then
+  begin
+      { Get next page from server.
+        Note: if FCursorId = NoCursorID, then all documents did fit in the reply, so there
+        is no need to get more data from the server. }
+    GetMore;
+    Result := (FPage <> nil);
+  end;
+end;
+
+procedure TgoMongoCursor.TEnumerator.GetMore;
+var
+  Reply: IgoMongoReply;
+  Writer: IgoBsonWriter;
+  ADoc, Cursor: TgoBsonDocument;
+  Docs: TgoBsonArray;
+  Value: TgoBsonValue;
+  I: Integer;
+begin
+  Writer := TgoBsonWriter.Create;
+  Writer.WriteStartDocument;
+  Writer.WriteInt64('getMore', FCursorId);
+  Writer.WriteString('collection', FCollectionName);
+  Writer.WriteInt32('batchSize', Length(FPage));
+    { MaxTimeMS ?}
+  SpecifyDB(Writer);
+  SpecifyReadPreference(Writer);
+  Writer.WriteEndDocument;
+  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  HandleTimeout(Reply);
+  FIndex := 0;
+  SetLength(FPage, 0);
+  ADoc := Reply.FirstDoc;
+  if not ADoc.IsNil then
+  begin
+    if ADoc.Contains('cursor') then
+    begin
+      Cursor := ADoc['cursor'].asBsonDocument;
+        // The cursor ID should become 0 when it is exhausted
+      FCursorId := Cursor['id']; // less overhead to do it here, than query reply.cursorid
+        // Namespace:=Cursor.Get('ns','').ToString();   --> does not change
+      Docs := Cursor['nextBatch'].AsBsonArray;
+      SetLength(FPage, Docs.Count);
+      I := 0;
+      for Value in Docs do
+      begin
+        FPage[I] := Value.asBsonDocument.ToBson;
+        Inc(I);
+      end;
+    end;
+  end;
+end;
+
+{$ENDREGION}
+
+{$REGION 'tgoMongoClient (owns the tgoMongoProtocol)'}
 
 class function TgoMongoClientSettings.Create: TgoMongoClientSettings;
 begin
@@ -1141,8 +1447,6 @@ begin
   Result.UseSnappyCompression := True; // snappy has priority over zlib if both are set
   Result.UseZlibCompression := false;
 end;
-
-{ TgoMongoClient }
 
 constructor TgoMongoClient.Create(const AHost: string; const APort: Integer);
 begin
@@ -1183,6 +1487,7 @@ end;
 
 destructor TgoMongoClient.Destroy;
 begin
+  {The client OWNS the protocol. The client is CONTAINED as a reference in tgoMongoDatabase, }
   FProtocol.Free;
   inherited;
 end;
@@ -1197,7 +1502,7 @@ begin
   Writer.WriteStartDocument;
   Writer.WriteInt32('dropDatabase', 1);
   Writer.WriteString('$db', AName);
-  { TODO : Readpreference??? }
+ { TODO : Readpreference??? }
   Writer.WriteEndDocument;
   Reply := FProtocol.OpMsg(Writer.ToBson, nil);
   HandleCommandReply(Reply);
@@ -1252,7 +1557,7 @@ begin
 end;
 
 function TgoMongoClient.GetInstanceInfo(const ASaslSupportedMechs: string = ''; const AComment: string = ''): TgoMongoInstanceInfo;
-// https://docs.mongodb.com/manual/reference/command/isMaster/
+                    // https://docs.mongodb.com/manual/reference/command/isMaster/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -1275,7 +1580,7 @@ begin
   HandleCommandReply(Reply);
 
   Doc := Reply.FirstDoc;
-  if not(Doc.IsNil) then
+  if not (Doc.IsNil) then
   begin
     Result.Primary := TgoMongoInstance.Create(Doc.Get('primary', '').ToString);
     Result.Me := TgoMongoInstance.Create(Doc.Get('me', '').ToString);
@@ -1312,12 +1617,17 @@ begin
     raise Exception.Create('invalid response');
 end;
 
+function TgoMongoClient.GetProtocol: TgoMongoProtocol;
+begin
+  Result := fProtocol;
+end;
+
 function TgoMongoClient.IsMaster: Boolean;
 begin
   Result := Self.GetInstanceInfo().IsMaster;
 end;
 
-{ This method performs an administrative command and returns ONE document.
+{ AdminCommand performs an administrative command and returns ONE document.
   It uses dependency injection by calling an anonymous method that "injects"
   commands into the BSON document }
 
@@ -1333,7 +1643,8 @@ begin
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil);
   HandleCommandReply(Reply);
-  Result := CreateCursor(Reply.FirstDoc, FProtocol, FProtocol.GlobalReadPreference);
+  with tgoCursorHelper do
+    Result := CreateCursor(Reply.FirstDoc, FProtocol, FProtocol.GlobalReadPreference);
 end;
 
 function TgoMongoClient.BuildInfo: TgoBsonDocument;
@@ -1362,9 +1673,19 @@ begin
     Result := Doc;
 end;
 
+function TgoMongoClient.getAvailable: Boolean;
+begin
+  Result := fAvailable;
+end;
+
 function TgoMongoClient.GetGlobalReadPreference: tgoMongoReadPreference;
 begin
   Result := FProtocol.GlobalReadPreference;
+end;
+
+function TgoMongoClient.getPooled: Boolean;
+begin
+  Result := fPooled;
 end;
 
 function TgoMongoClient.Hello: TgoBsonDocument;
@@ -1407,12 +1728,30 @@ begin
       Result := Doc['ok']
 end;
 
+procedure TgoMongoClient.ReleaseToPool;
+begin
+  fAvailable := True;
+end;
+
+procedure TgoMongoClient.setAvailable(const Value: Boolean);
+begin
+  fAvailable := Value;
+end;
+
 procedure TgoMongoClient.SetGlobalReadPreference(const Value: tgoMongoReadPreference);
 begin
   FProtocol.GlobalReadPreference := Value;
 end;
 
-{ TgoMongoDatabase }
+procedure TgoMongoClient.setPooled(const Value: Boolean);
+begin
+  fPooled := Value;
+end;
+
+
+{$ENDREGION}
+//
+{$REGION 'TgoMongoDatabase (contains an igoMongoClient reference)'}
 
 procedure TgoMongoDatabase.SpecifyDB(const AWriter: IgoBsonWriter);
 begin
@@ -1431,8 +1770,6 @@ begin
   inherited Create;
   FClient := AClient;
   FName := AName;
-  FProtocol := AClient.Protocol;
-  Assert(FProtocol <> nil);
   FReadPreference := tgoMongoReadPreference.fromParent;
 end;
 
@@ -1454,11 +1791,12 @@ begin
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil);
   HandleCommandReply(Reply);
-  Result := CreateCursor(Reply.FirstDoc, FProtocol, GetReadPreference);
+  with tgoCursorHelper do
+    Result := CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference);
 end;
 
 procedure TgoMongoDatabase.DropCollection(const AName: string);
-// https://docs.mongodb.com/manual/reference/command/drop/#dbcmd.drop
+  // https://docs.mongodb.com/manual/reference/command/drop/#dbcmd.drop
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -1469,7 +1807,7 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil);
   HandleCommandReply(Reply, TgoMongoErrorCode.NamespaceNotFound);
 end;
 
@@ -1479,7 +1817,7 @@ begin
 end;
 
 function TgoMongoDatabase.GetDbStats(const AScale: Integer): TgoMongoStatistics;
-// https://docs.mongodb.com/manual/reference/command/dbStats/
+  // https://docs.mongodb.com/manual/reference/command/dbStats/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -1492,7 +1830,7 @@ begin
   SpecifyReadPreference(Writer);
   Writer.WriteInt32('scale', AScale);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
   HandleCommandReply(Reply);
   Doc := Reply.FirstDoc;
   if Doc.IsNil then
@@ -1513,10 +1851,15 @@ begin
   Result.FsTotalSize := Doc.Get('fsTotalSize', 0).ToDouble;
 end;
 
-function TgoMongoDatabase.CreateCollection(const AName: string; const ACapped: Boolean; const AMaxSize, AMaxDocuments: Int64;
-const AValidationLevel: TgoMongoValidationLevel; const AValidationAction: TgoMongoValidationAction; const AValidator: TgoBsonDocument;
-const ACollation: TgoMongoCollation): Boolean;
-// https://docs.mongodb.com/manual/reference/method/db.createCollection/
+function TgoMongoDatabase.GetProtocol: TgoMongoProtocol;
+begin
+  result := fClient.protocol;
+end;
+
+function TgoMongoDatabase.CreateCollection(const AName: string; const ACapped: Boolean; const AMaxSize, AMaxDocuments: Int64; const
+  AValidationLevel: TgoMongoValidationLevel; const AValidationAction: TgoMongoValidationAction; const AValidator: TgoBsonDocument; const
+  ACollation: TgoMongoCollation): Boolean;
+  // https://docs.mongodb.com/manual/reference/method/db.createCollection/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -1533,7 +1876,7 @@ begin
     Writer.WriteInt64('size', AMaxSize);
     Writer.WriteInt64('max', AMaxDocuments);
   end;
-  // timeSeries...
+    // timeSeries...
 
   if AValidator.IsNil = false then
   begin
@@ -1555,7 +1898,7 @@ begin
   Writer.WriteBoolean('backwards', ACollation.Backwards);
   Writer.WriteEndDocument;
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
   Result := (HandleCommandReply(Reply) = 0);
 end;
 
@@ -1563,7 +1906,7 @@ function TgoMongoDatabase.GetReadPreference: tgoMongoReadPreference;
 begin
   Result := FReadPreference;
   if Result = tgoMongoReadPreference.fromParent then
-    Result := FProtocol.GlobalReadPreference;
+    Result := Protocol.GlobalReadPreference;
 end;
 
 function TgoMongoDatabase.ListCollectionNames: TArray<string>;
@@ -1578,7 +1921,7 @@ begin
 end;
 
 function TgoMongoDatabase.ListCollections: TArray<TgoBsonDocument>;
-// https://docs.mongodb.com/manual/reference/command/listCollections/
+  // https://docs.mongodb.com/manual/reference/command/listCollections/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -1590,13 +1933,14 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
   HandleCommandReply(Reply);
-  Result := ExhaustCursor(CreateCursor(Reply.FirstDoc, FProtocol, GetReadPreference));
+  with tgoCursorHelper do
+    Result := ToDocArray(CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference));
 end;
 
 function TgoMongoDatabase.RenameCollection(const AFromNamespace, AToNamespace: string; const ADropTarget: Boolean): Boolean;
-// https://docs.mongodb.com/manual/reference/command/renameCollection/
+  // https://docs.mongodb.com/manual/reference/command/renameCollection/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -1609,7 +1953,7 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil);
   Result := (HandleCommandReply(Reply) = 0);
 end;
 
@@ -1628,183 +1972,17 @@ begin
   Result := FName;
 end;
 
-{ TgoMongoCursor }
-
-constructor TgoMongoCursor.Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference;
-const ADatabaseName, ACollectionName: string; const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64);
-begin
-  inherited Create;
-  FProtocol := AProtocol;
-  FDatabaseName := ADatabaseName;
-  FCollectionName := ACollectionName;
-  FInitialPage := AInitialPage;
-  FInitialCursorId := AInitialCursorId;
-  FReadPreference := AReadPreference;
-end;
-
-constructor TgoMongoCursor.Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference; const aNameSpace: string;
-const AInitialPage: TArray<TBytes>; const AInitialCursorId: Int64);
-var
-  dotpos: Integer;
-begin
-  inherited Create;
-  dotpos := Pos('.', aNameSpace);
-  FProtocol := AProtocol;
-  FDatabaseName := copy(aNameSpace, 1, dotpos - 1);
-  FCollectionName := copy(aNameSpace, dotpos + 1, Length(aNameSpace));
-  FInitialPage := AInitialPage;
-  FInitialCursorId := AInitialCursorId;
-  FReadPreference := AReadPreference;
-end;
-
-function TgoMongoCursor.GetEnumerator: TEnumerator<TgoBsonDocument>;
-begin
-  Result := TEnumerator.Create(FProtocol, FReadPreference, FDatabaseName, FCollectionName, FInitialPage, FInitialCursorId);
-end;
-
-function TgoMongoCursor.ToArray: TArray<TgoBsonDocument>;
-var
-  Count, Capacity: Integer;
-  Doc: TgoBsonDocument;
-begin
-  Count := 0;
-  Capacity := 16;
-  SetLength(Result, Capacity);
-  for Doc in Self do
-  begin
-    if (Count >= Capacity) then
-    begin
-      Capacity := Capacity * 2;
-      SetLength(Result, Capacity);
-    end;
-    Result[Count] := Doc;
-    Inc(Count);
-  end;
-
-  SetLength(Result, Count);
-end;
-
-{ TgoMongoCursor.TEnumerator }
-
-procedure TgoMongoCursor.TEnumerator.SpecifyDB(const Writer: IgoBsonWriter);
-begin
-  Writer.WriteString('$db', FDatabaseName);
-end;
-
-procedure TgoMongoCursor.TEnumerator.SpecifyReadPreference(const AWriter: IgoBsonWriter);
-begin
-  DoSpecifyReadPreference(FReadPreference, AWriter);
-end;
-
-constructor TgoMongoCursor.TEnumerator.Create(const AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference;
-const ADatabaseName, ACollectionName: string; const APage: TArray<TBytes>; const ACursorId: Int64);
-begin
-  inherited Create;
-  FProtocol := AProtocol;
-  FDatabaseName := ADatabaseName;
-  FCollectionName := ACollectionName;
-  FPage := APage;
-  FCursorId := ACursorId;
-  FReadPreference := AReadPreference;
-  FIndex := -1;
-end;
-
-destructor TgoMongoCursor.TEnumerator.Destroy;
-var
-  Writer: IgoBsonWriter;
-  Reply: IgoMongoReply;
-begin
-  if FCursorId <> 0 then // we exited the for...in loop before the cursor was exhausted
-  begin
-    try
-      Writer := TgoBsonWriter.Create;
-      Writer.WriteStartDocument;
-      Writer.WriteString('killCursors', FCollectionName);
-      Writer.WriteStartArray('cursors');
-      Writer.WriteInt64(FCursorId);
-      Writer.WriteEndArray;
-      SpecifyDB(Writer);
-      SpecifyReadPreference(Writer);
-      Writer.WriteEndDocument;
-      { "true" tells protocol to NOT expect a result - saves one roundtrip }
-      Reply := FProtocol.OpMsg(True, Writer.ToBson, nil, True);
-    except
-      // always ignore exceptions in a destructor!
-    end;
-  end;
-  inherited;
-end;
-
-function TgoMongoCursor.TEnumerator.DoGetCurrent: TgoBsonDocument;
-begin
-  Result := TgoBsonDocument.Load(FPage[FIndex]);
-end;
-
-function TgoMongoCursor.TEnumerator.DoMoveNext: Boolean;
-begin
-  Result := (FIndex < (Length(FPage) - 1));
-  if Result then
-    Inc(FIndex)
-  else if (FCursorId <> NoCursorID) then
-  begin
-    { Get next page from server.
-      Note: if FCursorId = NoCursorID, then all documents did fit in the reply, so there
-      is no need to get more data from the server. }
-    GetMore;
-    Result := (FPage <> nil);
-  end;
-end;
-
-procedure TgoMongoCursor.TEnumerator.GetMore;
-var
-  Reply: IgoMongoReply;
-  Writer: IgoBsonWriter;
-  ADoc, Cursor: TgoBsonDocument;
-  Docs: TgoBsonArray;
-  Value: TgoBsonValue;
-  I: Integer;
-begin
-  Writer := TgoBsonWriter.Create;
-  Writer.WriteStartDocument;
-  Writer.WriteInt64('getMore', FCursorId);
-  Writer.WriteString('collection', FCollectionName);
-  Writer.WriteInt32('batchSize', Length(FPage));
-  { MaxTimeMS }
-  SpecifyDB(Writer);
-  SpecifyReadPreference(Writer);
-  Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
-  HandleTimeout(Reply);
-  FIndex := 0;
-  SetLength(FPage, 0);
-  ADoc := Reply.FirstDoc;
-  if not ADoc.IsNil then
-  begin
-    if ADoc.Contains('cursor') then
-    begin
-      Cursor := ADoc['cursor'].asBsonDocument;
-      // The cursor ID should become 0 when it is exhausted
-      FCursorId := Cursor['id']; // less overhead to do it here, than query reply.cursorid
-      // Namespace:=Cursor.Get('ns','').ToString();   --> does not change
-      Docs := Cursor['nextBatch'].AsBsonArray;
-      SetLength(FPage, Docs.Count);
-      I := 0;
-      for Value in Docs do
-      begin
-        FPage[I] := Value.asBsonDocument.ToBson;
-        Inc(I);
-      end;
-    end;
-  end;
-end;
-
-{ TgoMongoCollection }
+{$ENDREGION}
+//
+{$REGION 'tgoMongoCollection (contains an igoMongoDatabase reference)'}
 
 function TgoMongoCollection.EmptyCursor: igoMongoCursor;
-var Doc: TgoBsonDocument;
+var
+  Doc: TgoBsonDocument;
 begin
   Doc.SetNil;
-  Result := CreateCursor(Doc, FProtocol, FProtocol.GlobalReadPreference);
+  with tgoCursorHelper do
+    Result := CreateCursor(Doc, Protocol, Protocol.GlobalReadPreference);
 end;
 
 procedure TgoMongoCollection.SetReadPreference(const Value: tgoMongoReadPreference);
@@ -1824,7 +2002,7 @@ end;
 
 procedure TgoMongoCollection.AddWriteConcern(const AWriter: IgoBsonWriter);
 begin
-  { Write concerns are currently not supported }
+    { Write concerns are currently not supported }
 end;
 
 function TgoMongoCollection.Count: Integer;
@@ -1845,7 +2023,7 @@ begin
   Writer.WriteName('query');
   Writer.WriteRawBsonDocument(AFilter.ToBson);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil);
   Result := HandleCommandReply(Reply);
 end;
 
@@ -1856,13 +2034,12 @@ begin
   inherited Create;
   FDatabase := ADatabase;
   FName := AName;
-  FProtocol := ADatabase.Protocol;
   FReadPreference := tgoMongoReadPreference.fromParent;
-  Assert(FProtocol <> nil);
+  Assert(assigned(protocol));
 end;
 
 function TgoMongoCollection.CreateIndex(const AName: string; const AKeyFields: array of string; const AUnique: Boolean = false): Boolean;
-// https://docs.mongodb.com/manual/reference/command/createIndexes/
+  // https://docs.mongodb.com/manual/reference/command/createIndexes/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -1886,13 +2063,13 @@ begin
   Writer.WriteEndArray;
   AddWriteConcern(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil);
   Result := (HandleCommandReply(Reply) = 0);
 end;
 
 function TgoMongoCollection.CreateTextIndex(const AName: string; const AFields: array of string; const ALanguageOverwriteField: string = '';
-const ADefaultLanguage: string = 'en'): Boolean;
-// https://docs.mongodb.com/manual/core/index-text/
+  const ADefaultLanguage: string = 'en'): Boolean;
+  // https://docs.mongodb.com/manual/core/index-text/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -1920,12 +2097,12 @@ begin
   Writer.WriteEndArray;
   AddWriteConcern(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil);
   Result := (HandleCommandReply(Reply) = 0);
 end;
 
 function TgoMongoCollection.DropIndex(const AName: string): Boolean;
-// https://docs.mongodb.com/manual/reference/command/dropIndexes/
+  // https://docs.mongodb.com/manual/reference/command/dropIndexes/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -1938,12 +2115,12 @@ begin
   Writer.WriteString('index', AName);
   AddWriteConcern(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil);
   Result := (HandleCommandReply(Reply) = 0);
 end;
 
 function TgoMongoCollection.ListIndexNames: TArray<string>;
-// https://docs.mongodb.com/manual/reference/command/listIndexes/
+  // https://docs.mongodb.com/manual/reference/command/listIndexes/
 var
   Docs: TArray<TgoBsonDocument>;
   I: Integer;
@@ -1955,7 +2132,7 @@ begin
 end;
 
 function TgoMongoCollection.Stats: TgoBsonDocument;
-// https://www.mongodb.com/docs/manual/reference/command/collStats/
+  // https://www.mongodb.com/docs/manual/reference/command/collStats/
 var
   Doc: TgoBsonDocument;
 begin
@@ -1964,12 +2141,13 @@ begin
     procedure(Writer: IgoBsonWriter)
     begin
       Writer.WriteString('collStats', FName);
-    end) do;
+    end) do
+    ;
   Result := Doc;
 end;
 
 function TgoMongoCollection.ListIndexes: TArray<TgoBsonDocument>;
-// https://docs.mongodb.com/manual/reference/command/listIndexes/
+  // https://docs.mongodb.com/manual/reference/command/listIndexes/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -1981,13 +2159,14 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil);
   HandleCommandReply(Reply);
-  Result := ExhaustCursor(CreateCursor(Reply.FirstDoc, FProtocol, GetReadPreference));
+  with tgoCursorHelper do
+    Result := ToDocArray(CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference));
 end;
 
 function TgoMongoCollection.Delete(const AFilter: tgoMongoFilter; const AOrdered: Boolean; const ALimit: Integer): Integer;
-// https://docs.mongodb.com/manual/reference/command/delete/
+  // https://docs.mongodb.com/manual/reference/command/delete/
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -2006,7 +2185,7 @@ begin
   Writer.WriteEndArray;
   AddWriteConcern(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil);
   Result := HandleCommandReply(Reply);
 end;
 
@@ -2045,9 +2224,9 @@ begin
   Result := Find(FindOptions.filter(AFilter).sort(ASort));
 end;
 
-// https://docs.mongodb.com/manual/reference/method/db.collection.find
-function TgoMongoCollection.Find(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort;
-aSkip: Integer = 0): igoMongoCursor;
+  // https://docs.mongodb.com/manual/reference/method/db.collection.find
+function TgoMongoCollection.Find(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort; aSkip:
+  Integer = 0): igoMongoCursor;
 begin
   Result := Find(FindOptions.filter(AFilter).projection(AProjection).sort(ASort).skip(aSkip));
 end;
@@ -2065,23 +2244,21 @@ begin
   SpecifyReadPreference(Writer);
   AOptions.WriteOptions(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
   HandleCommandReply(Reply);
-  Result := CreateCursor(Reply.FirstDoc, FProtocol, GetReadPreference);
+  with tgoCursorHelper do
+    Result := CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference);
 end;
 
 function TgoMongoCollection.FindOne(AOptions: igoMongoFindOptions): TgoBsonDocument;
-var
-  Docs: TArray<TgoBsonDocument>;
 begin
-  Result.SetNil;
-  Docs := ExhaustCursor(Find(AOptions.singleBatch(True).limit(1)));
-  if Length(Docs) > 0 then
-    Result := Docs[0];
+  With TGOCursorHelper DO
+     Result:=FirstDoc(ToDocArray(Find(AOptions.singleBatch(True).limit(1))));
 end;
 
-function TgoMongoCollection.FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort)
-  : TgoBsonDocument;
+
+function TgoMongoCollection.FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort):
+  TgoBsonDocument;
 begin
   Result := FindOne(FindOptions.filter(AFilter).projection(AProjection).sort(ASort));
 end;
@@ -2117,6 +2294,11 @@ begin
     Result := 0;
 end;
 
+function TgoMongoCollection.GetProtocol: tgoMongoProtocol;
+begin
+  result := fdatabase.Protocol;
+end;
+
 function TgoMongoCollection.GetReadPreference: tgoMongoReadPreference;
 begin
   Result := FReadPreference;
@@ -2125,7 +2307,7 @@ begin
 end;
 
 function TgoMongoCollection.InsertMany(const ADocuments: PgoBsonDocument; const ACount: Integer; const AOrdered: Boolean): Integer;
-// https://docs.mongodb.com/manual/reference/command/insert/#dbcmd.insert
+  // https://docs.mongodb.com/manual/reference/command/insert/#dbcmd.insert
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -2133,14 +2315,13 @@ var
   tb: TBytes;
   Payload0: TBytes;
   Payload1: TArray<tgoPayloadType1>;
-
 begin
   Remaining := ACount;
-  index := 0;
+  Index := 0;
   Result := 0;
   while (Remaining > 0) do
   begin
-    ItemsInBatch := min(Remaining, FProtocol.MaxWriteBatchSize);
+    ItemsInBatch := min(Remaining, Protocol.MaxWriteBatchSize);
     SetLength(Payload1, 0);
     Writer := TgoBsonWriter.Create;
     Writer.WriteStartDocument;
@@ -2148,20 +2329,20 @@ begin
     SpecifyDB(Writer);
     SpecifyReadPreference(Writer);
 
-    (* DEPRECATED
-      {This is the SLOW/LEGACY method because the server needs to unpack
-      an array contained inside a very large document.
-      It is faster to "outsource" the "documents" array into a separate
-      sequence of Payload type 1}
-      Writer.WriteStartArray('documents');
-      for I := 0 to ItemsInBatch - 1 do
-      begin
-      Writer.WriteValue(ADocuments[index]);
-      Inc(index);
-      Dec(Remaining);
-      end;
-      Writer.WriteEndArray;
- *)
+      (* DEPRECATED
+        {This is the SLOW/LEGACY method because the server needs to unpack
+        an array contained inside a very large document.
+        It is faster to "outsource" the "documents" array into a separate
+        sequence of Payload type 1}
+        Writer.WriteStartArray('documents');
+        for I := 0 to ItemsInBatch - 1 do
+        begin
+        Writer.WriteValue(ADocuments[index]);
+        Inc(index);
+        Dec(Remaining);
+        end;
+        Writer.WriteEndArray;
+   *)
 
     Writer.WriteBoolean('ordered', AOrdered);
     AddWriteConcern(Writer);
@@ -2170,33 +2351,33 @@ begin
     BytesEncoded := Length(Payload0) + 100; // overly generous estimation
     Writer := nil;
 
-    { https://github.com/mongodb/specifications/blob/master/source/message/OP_MSG.rst#command-arguments-as-payload
-      "Bulk writes SHOULD use Payload Type 1, and MUST do so when the batch contains more than one entry."
-      N.B.: This method is faster because the server can read the "documents" parameter as a
-      simple sequential stream of small documents. }
+      { https://github.com/mongodb/specifications/blob/master/source/message/OP_MSG.rst#command-arguments-as-payload
+        "Bulk writes SHOULD use Payload Type 1, and MUST do so when the batch contains more than one entry."
+        N.B.: This method is faster because the server can read the "documents" parameter as a
+        simple sequential stream of small documents. }
 
     SetLength(Payload1, 1); // Send ONE sequence of Payload1 with multiple docs
     Payload1[0].name := 'documents';
     SetLength(Payload1[0].Docs, ItemsInBatch);
     for I := 0 to ItemsInBatch - 1 do
     begin
-      tb := ADocuments[index].ToBson;
-      { Avoid excessive message size or batch count }
-      if ((BytesEncoded + Length(tb)) > FProtocol.MaxMessageSizeBytes) then
+      tb := ADocuments[Index].ToBson;
+        { Avoid excessive message size or batch count }
+      if ((BytesEncoded + Length(tb)) > Protocol.MaxMessageSizeBytes) then
       begin
         SetLength(Payload1[0].Docs, I);
         Break;
       end;
       Inc(BytesEncoded, Length(tb));
       Payload1[0].Docs[I] := tb;
-      Inc(index);
+      Inc(Index);
       dec(Remaining);
     end; // FOR
 
-    Reply := FProtocol.OpMsg(True, Payload0, Payload1);
+    Reply := Protocol.OpMsg(True, Payload0, Payload1);
     Inc(Result, HandleCommandReply(Reply));
   end; // While
-  Assert(index = ACount);
+  Assert(Index = ACount);
 end;
 
 function TgoMongoCollection.InsertMany(const ADocuments: TEnumerable<TgoBsonDocument>; const AOrdered: Boolean): Integer;
@@ -2205,7 +2386,7 @@ begin
 end;
 
 function TgoMongoCollection.InsertOne(const ADocument: TgoBsonDocument): Boolean;
-// https://docs.mongodb.com/manual/reference/command/insert/#dbcmd.insert
+  // https://docs.mongodb.com/manual/reference/command/insert/#dbcmd.insert
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -2220,13 +2401,13 @@ begin
   Writer.WriteEndArray;
   AddWriteConcern(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
   Result := (HandleCommandReply(Reply) = 1);
 end;
 
-function TgoMongoCollection.Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate;
-const AUpsert, AOrdered, AMulti: Boolean): Integer;
-// https://docs.mongodb.com/manual/reference/command/update
+function TgoMongoCollection.Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean):
+  Integer;
+  // https://docs.mongodb.com/manual/reference/command/update
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -2249,12 +2430,12 @@ begin
   Writer.WriteBoolean('ordered', AOrdered);
   AddWriteConcern(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
   Result := HandleCommandReply(Reply);
 end;
 
-function TgoMongoCollection.UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate;
-const AUpsert, AOrdered: Boolean): Integer;
+function TgoMongoCollection.UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered: Boolean):
+  Integer;
 begin
   Result := Update(AFilter, AUpdate, AUpsert, AOrdered, True);
 end;
@@ -2274,7 +2455,10 @@ begin
   Result := FName;
 end;
 
-{ TgoMongoValidationLevelHelper }
+{$ENDREGION}
+//
+{$REGION 'Helpers'}
+  { TgoMongoValidationLevelHelper }
 
 function TgoMongoValidationLevelHelper.ToString: string;
 begin
@@ -2290,7 +2474,7 @@ begin
   end;
 end;
 
-{ TgoMongoValidationActionHelper }
+  { TgoMongoValidationActionHelper }
 
 function TgoMongoValidationActionHelper.ToString: string;
 begin
@@ -2304,7 +2488,7 @@ begin
   end;
 end;
 
-{ TgoMongoCollationCaseFirstHelper }
+  { TgoMongoCollationCaseFirstHelper }
 
 function TgoMongoCollationCaseFirstHelper.ToString: string;
 begin
@@ -2320,7 +2504,7 @@ begin
   end;
 end;
 
-{ TgoMongoCollationAlternateHelper }
+  { TgoMongoCollationAlternateHelper }
 
 function TgoMongoCollationAlternateHelper.ToString: string;
 begin
@@ -2334,7 +2518,7 @@ begin
   end;
 end;
 
-{ TgoMongoCollationMaxVariableHelper }
+  { TgoMongoCollationMaxVariableHelper }
 
 function TgoMongoCollationMaxVariableHelper.ToString: string;
 begin
@@ -2348,7 +2532,12 @@ begin
   end;
 end;
 
-{ TgoMongoInstance }
+
+
+{$ENDREGION}
+//
+{$REGION 'tgoMongoInstance'}
+  { TgoMongoInstance }
 
 constructor TgoMongoInstance.Create(AHost: string; APort: Word);
 begin
@@ -2370,10 +2559,15 @@ begin
   end;
 end;
 
+
+{$ENDREGION}
+//
+{$REGION 'tgoMongoFindOptions'}
+
 type
-  { Record that contains most function parameters for collection.Find(),
-    see https://www.mongodb.com/docs/manual/reference/command/find/.
-    We also implement a fluent interface for this. }
+    { Record that contains most function parameters for collection.Find(),
+      see https://www.mongodb.com/docs/manual/reference/command/find/.
+      We also implement a fluent interface for this. }
 
   tgoMongoFindOptionsRec = record
     skip: Integer;
@@ -2396,7 +2590,6 @@ type
     hint: string;
     comment: string;
     procedure clear;
-
     procedure WriteOptions(const Writer: IgoBsonWriter);
     function asBsonDocument: TgoBsonDocument;
     function asJson: string;
@@ -2404,7 +2597,7 @@ type
     procedure fromJson(const aJson: string);
   end;
 
-  { Class that implements fluent interface igoMongoFindOptions }
+    { Class that implements fluent interface igoMongoFindOptions }
 
   tgoMongoFindOptions = class(TInterfacedObject, igoMongoFindOptions)
   private
@@ -2505,7 +2698,7 @@ end;
 constructor tgoMongoFindOptions.Create;
 begin
   inherited Create;
-  // foptions is a "member" and should already be completely filled with 0. We just make sure ...
+    // foptions is a "member" and should already be completely filled with 0. We just make sure ...
   Fillchar(foptions, sizeof(foptions), 0);
   foptions.batchSize := MongoDefBatchSize;
 end;
@@ -2663,7 +2856,7 @@ begin
   Result := tgoMongoFindOptions.Create;
 end;
 
-// *********************************
+  // *********************************
 
 procedure tgoMongoFindOptionsRec.clear;
 begin
@@ -2673,7 +2866,8 @@ begin
 end;
 
 function tgoMongoFindOptionsRec.asBsonDocument: TgoBsonDocument;
-var Writer: IgoBsonWriter;
+var
+  Writer: IgoBsonWriter;
 begin
   Writer := TgoBsonWriter.Create;
   Writer.WriteStartDocument;
@@ -2683,7 +2877,8 @@ begin
 end;
 
 function tgoMongoFindOptionsRec.asJson: string;
-var Bson: TgoBsonDocument;
+var
+  Bson: TgoBsonDocument;
 begin
   Bson := asBsonDocument;
   Result := Bson.ToJson;
@@ -2727,7 +2922,9 @@ begin
 end;
 
 procedure tgoMongoFindOptionsRec.fromJson(const aJson: string);
-var Bson: TgoBsonDocument; reader: igojsonreader;
+var
+  Bson: TgoBsonDocument;
+  reader: igojsonreader;
 begin
   reader := tgojsonreader.Create(aJson, false);
   Bson := reader.ReadDocument;
@@ -2807,4 +3004,119 @@ begin
     Writer.WriteBoolean('allowDiskUse', allowDiskUse);
 end;
 
+{$ENDREGION}
+//
+
+//
+{$REGION 'tgoConnectionPool - a connection pool for multithreaded applications.'}
+
+constructor tgoConnectionPool.Create(const aHost: string; aPort: Integer; const aSettings: tgoMongoClientSettings; aMaxitems: integer);
+begin
+  inherited create;
+  fHost := aHost;
+  fPort := aPort;
+  fSettings := aSettings;
+  flock := tCriticalsection.Create;
+  fMaxItems := aMaxitems;
+end;
+
+destructor tgoConnectionPool.Destroy;
+begin
+  fLock.Free;
+  inherited;
+end;
+
+{Can be called "from the outside" to put a connected client into the pool.
+ Normally you won't need this method.}
+procedure tgoConnectionPool.AddToPool(const Client: igoMongoClient);
+begin
+  flock.Acquire;
+  try
+    if (IndexOf(Client) < 0) then
+      Add(Client);
+    Client.pooled := True;
+    Client.Available := True;
+  finally
+    flock.Release;
+  end;
+end;
+
+
+
+{Get an available client connection from the connection pool and make it unavailable}
+
+function tgoConnectionPool.GetAvailableClient: igoMongoClient;
+var
+  item: igoMongoClient;
+begin
+  repeat
+    flock.Acquire;
+      //Find the first available connection
+    for item in self do
+      if (item.Available) then
+      begin
+        item.Available := False;
+        flock.release;
+        exit(item);
+      end;
+
+      //No free connections available ? Create a new one if allowed.
+    if (Count < fmaxitems) then
+    begin
+      try
+        item := tgoMongoClient.create(fHost, fPort, fSettings);  //Does handshake - May throw exception if connection fails
+        item.Pooled := True;
+        item.Available := False;
+        Add(item);
+        exit(item);
+      finally
+        flock.release;
+      end;
+    end
+    else  //Max number of connections reached - sleep until one becomes available.
+    begin
+      flock.release;
+      sleep(1);
+    end;
+  until false;
+end;
+
+{Purge removes all currently unused connections from the pool}
+
+procedure tgoConnectionPool.Purge;
+var
+  i: integer;
+  item: igoMongoClient;
+  Unused: tArray<igoMongoClient>;
+begin
+  flock.Acquire;
+  try
+    for i := Count - 1 downto 0 do
+    begin
+      item := items[i];
+      if (item.Available) then
+      begin
+        item.Pooled := False; //indicate that item is no longer in a pool
+        Unused := Unused + [item]; //Move item from pool to array
+        delete(i);
+        item := NIL;
+      end;
+    end;
+  finally
+    flock.Release;
+  end;
+
+  {The implicit finalization of this method finalizes all elements of the array.
+  If the connections are not referenced anywhere they will be freed here.}
+
+end;
+
+procedure tgoConnectionPool.ReleaseToPool(const Client: igoMongoClient);
+begin
+  Client.Available := True;
+end;
+
+{$ENDREGION}
+
 end.
+
