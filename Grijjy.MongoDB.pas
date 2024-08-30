@@ -820,29 +820,47 @@ type
 
 
 
-  {tgoConnectionPool is a connection pool of client connections,
+  {igoConnectionPool is a connection pool of client connections,
    intended for a multi-tasking environment where worker threads
    may temporarily need connections and where it is advantageous
    (performance-wise and latency-wise) to re-use existing connections
    instead of having to establish new ones: The whole connection
    sequence is skipped if the client is already connected.}
 
-  tgoConnectionPool = class(tlist<igoMongoClient>)
-  private
+  igoConnectionPool = interface
+    ['{D4ED8586-16BF-4F3C-86A4-13DDA92694AA}']
+    function GetConnectionSettings: tgoMongoClientSettings;
+    function getHost: string;
+    function getPort: Integer;
+    function GetAvailableClient: igoMongoClient; //grabs an available client connection from the pool.
+    procedure ClearAll; //Removes ALL connections;
+    procedure Purge; //Deletes currently unused connections
+    property ConnectionSettings: tgoMongoClientSettings read GetConnectionSettings;
+    property Host: string read GetHost;
+    property Port: integer read GetPort;
+  end;
+
+  tgoConnectionPool = class(tinterfacedobject, igoConnectionPool)
     flock: tCriticalSection;
     fHost: string;
     fPort: integer;
-    fSettings: tgoMongoClientSettings;
-    fMaxitems: integer;
+    fMaxItems: Integer;
+    fConnectionSettings: tgoMongoClientSettings;
+    flist: tlist<igoMongoClient>;
+    function getConnectionSettings: tgoMongoClientSettings;
+    function getHost: string;
+    function getPort: integer;
   public
-    function GetAvailableClient: igoMongoClient; //grabs an available client connection from the pool.
-    procedure ReleaseToPool(const Client: igoMongoClient);//Releases the connection back to the pool
-
-    procedure Purge; //Deletes currently unused connections
-    procedure AddToPool(const Client: igoMongoClient);
-
     constructor Create(const AHost: string; APort: Integer; const ASettings: tgoMongoClientSettings; aMaxitems: integer);
     destructor Destroy; override;
+
+    function GetAvailableClient: igoMongoClient; //grabs an available client connection from the pool.
+    procedure ReleaseToPool(const Client: igoMongoClient);//Releases the connection back to the pool
+    procedure ClearAll;
+    procedure Purge; //Deletes currently unused connections
+    property ConnectionSettings: tgoMongoClientSettings read getConnectionSettings;
+    property Host: string read getHost;
+    property Port: integer read getPort;
   end;
 
 resourcestring
@@ -966,9 +984,8 @@ type
 
     class function ToDocArray(const aCursor: igoMongoCursor): TArray<TgoBsonDocument>;
 
-    class function ToBsonArray(const DocArray: TArray<TgoBsonDocument>):tgoBsonArray;   Overload;
-    class function ToBsonArray(const aCursor: igoMongoCursor):tgoBsonArray;   Overload;
-
+    class function ToBsonArray(const DocArray: TArray<TgoBsonDocument>): tgoBsonArray; overload;
+    class function ToBsonArray(const aCursor: igoMongoCursor): tgoBsonArray; overload;
 
     class function FirstDoc(const Docs: tArray<tgoBsonDocument>): tgoBsonDocument;
   end;
@@ -1218,18 +1235,18 @@ begin
 end;
 
 class function tgoCursorhelper.ToBsonArray(const DocArray: TArray<TgoBsonDocument>): tgoBsonArray;
-var i:integer;
+var
+  i: integer;
 begin
 { TODO : UNTESTED }
-  result:=tgoBsonArray.Create(length(Docarray));
-  for i:=0 to high(docarray) do
-    result.add((docarray[i]));
+  result := tgoBsonArray.Create(length(DocArray));
+  for i := 0 to high(DocArray) do
+    result.add((DocArray[i]));
 end;
-
 
 class function tgoCursorhelper.ToBsonArray(const aCursor: igoMongoCursor): tgoBsonArray;
 begin
-  Result:=ToBsonArray(ToDocArray(aCursor));
+  Result := ToBsonArray(ToDocArray(aCursor));
 end;
 
 {Fully exhausts a cursor and puts all elements into an array of docs}
@@ -1307,7 +1324,7 @@ begin
     Inc(Count);
   end;
 
-  SetLength(Result, Count);//Truncate
+  SetLength(Result, Count); //Truncate
 end;
 
   { TgoMongoCursor.TEnumerator }
@@ -2252,10 +2269,9 @@ end;
 
 function TgoMongoCollection.FindOne(AOptions: igoMongoFindOptions): TgoBsonDocument;
 begin
-  With TGOCursorHelper DO
-     Result:=FirstDoc(ToDocArray(Find(AOptions.singleBatch(True).limit(1))));
+  with TGOCursorHelper do
+    Result := FirstDoc(ToDocArray(Find(AOptions.singleBatch(True).limit(1))));
 end;
-
 
 function TgoMongoCollection.FindOne(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort):
   TgoBsonDocument;
@@ -3013,9 +3029,10 @@ end;
 constructor tgoConnectionPool.Create(const aHost: string; aPort: Integer; const aSettings: tgoMongoClientSettings; aMaxitems: integer);
 begin
   inherited create;
+  flist := tlist<igoMongoClient>.Create;
   fHost := aHost;
   fPort := aPort;
-  fSettings := aSettings;
+  fConnectionSettings := aSettings;
   flock := tCriticalsection.Create;
   fMaxItems := aMaxitems;
 end;
@@ -3023,22 +3040,8 @@ end;
 destructor tgoConnectionPool.Destroy;
 begin
   fLock.Free;
+  flist.free;
   inherited;
-end;
-
-{Can be called "from the outside" to put a connected client into the pool.
- Normally you won't need this method.}
-procedure tgoConnectionPool.AddToPool(const Client: igoMongoClient);
-begin
-  flock.Acquire;
-  try
-    if (IndexOf(Client) < 0) then
-      Add(Client);
-    Client.pooled := True;
-    Client.Available := True;
-  finally
-    flock.Release;
-  end;
 end;
 
 
@@ -3052,22 +3055,22 @@ begin
   repeat
     flock.Acquire;
       //Find the first available connection
-    for item in self do
+    for item in flist do
       if (item.Available) then
       begin
-        item.Available := False;
+        item.Available := False;  //mark it "in use" and return the item
         flock.release;
         exit(item);
       end;
 
       //No free connections available ? Create a new one if allowed.
-    if (Count < fmaxitems) then
+    if (flist.Count < fmaxitems) then
     begin
       try
-        item := tgoMongoClient.create(fHost, fPort, fSettings);  //Does handshake - May throw exception if connection fails
+        item := tgoMongoClient.create(fHost, fPort, fConnectionSettings);  //Does handshake - May throw exception if connection fails
+        flist.Add(item);
         item.Pooled := True;
-        item.Available := False;
-        Add(item);
+        item.Available := False;    //Mark it "in use" and return the item
         exit(item);
       finally
         flock.release;
@@ -3081,39 +3084,86 @@ begin
   until false;
 end;
 
-{Purge removes all currently unused connections from the pool}
+function tgoConnectionPool.getConnectionSettings: tgoMongoClientSettings;
+begin
+  Result := fConnectionSettings;
+end;
+
+function tgoConnectionPool.getHost: string;
+begin
+  Result := fHost;
+end;
+
+function tgoConnectionPool.getPort: integer;
+begin
+  Result := fPort;
+end;
+
+{Purge compacts the pool by removing all currently unused connections.
+ Those will be destroyed if they are not referenced.}
 
 procedure tgoConnectionPool.Purge;
 var
   i: integer;
   item: igoMongoClient;
-  Unused: tArray<igoMongoClient>;
+  ItemsToKill: tArray<igoMongoClient>;
 begin
   flock.Acquire;
   try
-    for i := Count - 1 downto 0 do
+    for i := flist.Count - 1 downto 0 do
     begin
-      item := items[i];
+      item := flist[i];
       if (item.Available) then
       begin
         item.Pooled := False; //indicate that item is no longer in a pool
-        Unused := Unused + [item]; //Move item from pool to array
-        delete(i);
+        ItemsToKill := ItemsToKill + [item]; //Move item from pool to array
+        flist.delete(i);
         item := NIL;
       end;
     end;
   finally
     flock.Release;
   end;
-
-  {The implicit finalization of this method finalizes all elements of the array.
-  If the connections are not referenced anywhere they will be freed here.}
-
+  {The implicit finalization of this method finalizes all elements of ItemsToKill [].
+  If the connections are not referenced anywhere they will be freed here.
+  It may cost some time but the list isn't locked.}
 end;
+
+
+
+{ClearAll empties the pool. The connections are only destroyed if they are not in use}
+
+procedure tgoConnectionPool.ClearAll;
+var
+  i: integer;
+  item: igoMongoClient;
+  ItemsToKill: tArray<igoMongoClient>;
+begin
+  flock.Acquire;
+  try
+    for i := flist.Count - 1 downto 0 do
+    begin
+      item := flist[i];
+      item.Pooled := False; //indicate that item is no longer in a pool
+      ItemsToKill := ItemsToKill + [item]; //Move item from pool to array
+      flist.delete(i);
+      item := NIL;
+    end;
+  finally
+    flock.Release;
+  end;
+
+  {The implicit finalization of this method finalizes all elements of ItemsToKill [].
+  If the connections are not referenced anywhere they will be freed here.
+  It may cost some time but the list isn't locked.}
+end;
+
+
+
 
 procedure tgoConnectionPool.ReleaseToPool(const Client: igoMongoClient);
 begin
-  Client.Available := True;
+  Client.ReleaseToPool;
 end;
 
 {$ENDREGION}
