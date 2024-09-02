@@ -864,6 +864,26 @@ type
     property Port: integer read getPort;
   end;
 
+
+type
+  {tgoCursorhelper can determine if a BSON DOC contains a cursor and create an igoMongoCursor from it}
+  tgoCursorhelper = class
+    class function HasCursor(const ADoc: TgoBsonDocument; var Cursor: TgoBsonDocument; var CursorID: Int64; var Namespace: string): Boolean;
+      inline;
+    class function CreateCursor(const ADoc: TgoBsonDocument; AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference):
+      igoMongoCursor;
+
+    class function ToDocArray(const aCursor: igoMongoCursor): TArray<TgoBsonDocument>;
+
+    class function ToBsonArray(const DocArray: TArray<TgoBsonDocument>): tgoBsonArray; overload;
+    class function ToBsonArray(const aCursor: igoMongoCursor): tgoBsonArray; overload;
+
+    class function FirstDoc(const Docs: tArray<tgoBsonDocument>): tgoBsonDocument;
+  end;
+
+
+
+
 resourcestring
   RS_MONGODB_CONNECTION_ERROR = 'Error connecting to the MongoDB database';
   RS_MONGODB_GENERIC_ERROR = 'Unspecified error while performing MongoDB operation';
@@ -976,22 +996,6 @@ begin
 end;
 
 type
-  {tgoCursorhelper can determine if a BSON DOC contains a cursor and create an igoMongoCursor from it}
-  tgoCursorhelper = class
-    class function HasCursor(const ADoc: TgoBsonDocument; var Cursor: TgoBsonDocument; var CursorID: Int64; var Namespace: string): Boolean;
-      inline;
-    class function CreateCursor(const ADoc: TgoBsonDocument; AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference):
-      igoMongoCursor;
-
-    class function ToDocArray(const aCursor: igoMongoCursor): TArray<TgoBsonDocument>;
-
-    class function ToBsonArray(const DocArray: TArray<TgoBsonDocument>): tgoBsonArray; overload;
-    class function ToBsonArray(const aCursor: igoMongoCursor): tgoBsonArray; overload;
-
-    class function FirstDoc(const Docs: tArray<tgoBsonDocument>): tgoBsonDocument;
-  end;
-
-
   {tgoMongoCursor is a cursor engine. It implements a for ... in enumerator that automatically
   retrieves the next batch of documents if its buffer is exhausted.}
   TgoMongoCursor = class(TInterfacedObject, igoMongoCursor)
