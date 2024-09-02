@@ -833,6 +833,7 @@ type
     function getHost: string;
     function getPort: Integer;
     function GetAvailableClient: igoMongoClient; //grabs an available client connection from the pool.
+    procedure ReleaseToPool(const Client: igoMongoClient);//Releases the connection back to the pool
     procedure ClearAll; //Removes ALL connections;
     procedure Purge; //Deletes currently unused connections
     property ConnectionSettings: tgoMongoClientSettings read GetConnectionSettings;
