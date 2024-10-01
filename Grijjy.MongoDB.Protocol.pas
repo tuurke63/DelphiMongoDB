@@ -8,12 +8,7 @@ unit Grijjy.MongoDB.Protocol;
 interface
 
 uses
-  System.Diagnostics,
-  System.Math,
-  System.SyncObjs,
-  System.SysUtils,
-  System.Generics.Collections,
-  Grijjy.SysUtils,
+  System.Diagnostics, System.Math, System.SyncObjs, System.SysUtils, System.Generics.Collections, Grijjy.SysUtils,
 {$IF Defined(MSWINDOWS)}
   Grijjy.SocketPool.Win,
 {$ELSEIF Defined(LINUX)}
@@ -21,8 +16,7 @@ uses
 {$ELSE}
 {$MESSAGE Error 'The MongoDB driver is only supported on Windows and Linux'}
 {$ENDIF}
-  Grijjy.MongoDB.Compressors,
-  Grijjy.Bson;
+  Grijjy.MongoDB.Compressors, Grijjy.Bson;
 
 const
   { Virtual collection that is used for query commands }
@@ -48,40 +42,41 @@ type
       if more data were received. Like any “latent cursor”, the cursor may
       become invalid at some point (CursorNotFound) – for example if the final
       object it references were deleted. }
-    TailableCursor = 1, // =>DBQuery.Option.Tailable   bit 1 = value 2
+        TailableCursor = 1, // =>DBQuery.Option.Tailable   bit 1 = value 2
 
     { Allow query of replica slave. Normally these return an error except for
       namespace “local”. }
-    SlaveOk = 2, // =>DBQuery.Option.SlaveOK bit 2 = value 4
+        SlaveOk = 2, // =>DBQuery.Option.SlaveOK bit 2 = value 4
 
     { Internal replication use only - driver should not set. }
-    OplogRelay = 3,
+        OplogRelay = 3,
 
     { The server normally times out idle cursors after an inactivity period
       (10 minutes) to prevent excess memory use. Set this option to prevent
       that. }
-    NoCursorTimeout = 4, // =>DBQuery.Option.NoTimeout   bit 4 = 16
+        NoCursorTimeout = 4, // =>DBQuery.Option.NoTimeout   bit 4 = 16
 
     { Use with TailableCursor. If we are at the end of the data, block for a
       while rather than returning no data. After a timeout period, we do return
       as normal. }
-    AwaitData = 5, // =>DBQuery.Option.AwaitData   bit 5=32
+        AwaitData = 5, // =>DBQuery.Option.AwaitData   bit 5=32
 
     { Stream the data down full blast in multiple “more” packages, on the
       assumption that the client will fully read all data queried. Faster when
       you are pulling a lot of data and know you want to pull it all down.
       Note: the client is not allowed to not read all the data unless it closes the connection. }
-    Exhaust = 6, // =>DBQuery.Option.Exhaust  bit 6=64
+        Exhaust = 6, // =>DBQuery.Option.Exhaust  bit 6=64
 
     { Get partial results from a mongos if some shards are down (instead of
       throwing an error) }
-    Partial = 7); // =>DBQuery.Option.Partial  bit 7=128
+        Partial = 7); // =>DBQuery.Option.Partial  bit 7=128
 
   TgoMongoQueryFlags = set of TgoMongoQueryFlag;
 
   { Flags for new OP_MSG protocol }
 
   TGoMongoMsgFlag = (msgfChecksumPresent, msgfMoreToCome, msgfExhaustAllowed = 16, msgfPadding = 31); // padded to ensure the SET is 32 bits
+
   TgoMongoMsgFlags = set of TGoMongoMsgFlag; // is 4 bytes in size
 
 type
@@ -123,10 +118,10 @@ type
 
     { Timeout waiting for partial or complete reply events, in milliseconds.
       Defaults to 5000 (5 seconds) }
-    ReplyTimeout: Integer;
+      ReplyTimeout: Integer;
 
     { Default query flags }
-    QueryFlags: TgoMongoQueryFlags; // OBSOLETE
+      QueryFlags: TgoMongoQueryFlags; // OBSOLETE
 
     GlobalReadPreference: tgoMongoReadPreference;
 
@@ -168,13 +163,16 @@ const
 type
   TgoMongoProtocol = class
 {$REGION 'Internal Declarations'}
-  type
+    type
 
-  private const
-    RECV_BUFFER_SIZE = 32768;
-    EMPTY_DOCUMENT: array [0 .. 4] of Byte = (5, 0, 0, 0, 0);
+
   private
-    class var FClientSocketManager: TgoClientSocketManager;
+    const
+      RECV_BUFFER_SIZE = 32768;
+      EMPTY_DOCUMENT: array[0..4] of Byte = (5, 0, 0, 0, 0);
+  private
+    class var
+      FClientSocketManager: TgoClientSocketManager;
   private
     FHost: string;
     FPort: Integer;
@@ -195,7 +193,7 @@ type
     FMaxWriteBatchSize: Integer;
     FMaxMessageSizeBytes: Integer;
     fknowsZlib, fknowsSnappy: Boolean;
-
+    fHandShakeRecursion: Integer; //for handshaking
   private
     procedure Send(const adata: tBytes);
     procedure Recover;
@@ -214,6 +212,8 @@ type
     { Connection }
     function Connect: Boolean;
     function IsConnected: Boolean;
+    function EnsureConnected: Boolean;
+
     function ConnectionState: TgoConnectionState; inline;
   private
     { Socket events }
@@ -224,7 +224,9 @@ type
     procedure RemoveReply(const ARequestId: Integer);
     procedure UpdateReplyTimeout(const ARequestId: Integer);
     procedure Compress(var Packet: tBytes);
+
   public
+    function KnowsCompression: Boolean;
     function ThisMoment: tStopWatch;
     class constructor Create;
     class destructor Destroy;
@@ -239,11 +241,11 @@ type
     constructor Create(const AHost: string; const APort: Integer; const ASettings: TgoMongoProtocolSettings);
     destructor Destroy; override;
 
-    function OpMsg(const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>; NoResponse: Boolean = False)
-      : IgoMongoReply; overload;
+    function OpMsg(const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>; NoResponse: Boolean = False): IgoMongoReply;
+      overload;
 
-    function OpMsg(CompressionAllowed: Boolean; const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>;
-      NoResponse: Boolean = False): IgoMongoReply; overload;
+    function OpMsg(CompressionAllowed: Boolean; const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>; NoResponse: Boolean =
+      False): IgoMongoReply; overload;
 
     function SupportsOpMsg: Boolean;
 
@@ -271,9 +273,7 @@ const
 implementation
 
 uses
-  System.DateUtils,
-  Grijjy.Bson.IO,
-  Grijjy.Scram;
+  System.DateUtils, Grijjy.Bson.IO, Grijjy.Scram;
 
 type
   TMsgHeader = packed record
@@ -290,7 +290,6 @@ type
   PMsgHeader = ^TMsgHeader;
 
 type
-
   TOPMSGHeader = packed record
     Header: TMsgHeader;
     flagbits: TgoMongoMsgFlags; // flagbits is part of the DATA. 32 bits because msgfExhaustAllowed = 16
@@ -312,21 +311,23 @@ type
   end;
 
   POpMsgHeader = ^TOPMSGHeader;
+
   POPCompressedHeader = ^TOPCompressedHeader;
 
   tCRC32 = Cardinal;
+
   tgoPayloadDecodeResult = (pdEOF, pdInvalidPayloadType, pdBufferOverrun, pdOK);
 
   tMsgPayload = class
-  const
-    EmptyDocSize = 5;
-    MinSequenceSize = 1 + EmptyDocSize;
+    const
+      EmptyDocSize = 5;
+      MinSequenceSize = 1 + EmptyDocSize;
 
     // Try to read a BSON document from a buffer. if successful, update "Bytesread".
     // The BSON document itself is not validated.
     // If testmode=true, it is a testrun only, the returned array is empty.
-    class function ReadBsonDoc(TestMode: Boolean; out Bson: tBytes; buffer: Pointer; BytesAvail: Integer; var BytesRead: Integer)
-      : tgoPayloadDecodeResult;
+    class function ReadBsonDoc(TestMode: Boolean; out Bson: tBytes; buffer: Pointer; BytesAvail: Integer; var BytesRead: Integer):
+      tgoPayloadDecodeResult;
 
     // Try to read a TYPE 0 or Type1 payload from a buffer. If successful, update "Bytesread".
     // The BSON documents themselves are not validated.
@@ -345,6 +346,7 @@ type
     rvrDataError); // decoding of message failed, badly formatted or data corruption
 
   { Implements IgoMongoReply - it is an OP_MSG sent by the server to the client. }
+
   TgoMongoMsgReply = class(TInterfacedObject, IgoMongoReply)
   private
     FHeader: TOPMSGHeader;
@@ -358,12 +360,11 @@ type
     function _GetPayload1: TArray<tgoPayloadType1>;
     function _FirstDoc: TgoBsonDocument;
   public
+    class function ValidateOPMessage(const ABuffer: tBytes; const ASize: Integer; var aSizeRead: Integer; out AReply: IgoMongoReply):
+      tgoReplyValidationResult;
 
-    class function ValidateOPMessage(const ABuffer: tBytes; const ASize: Integer; var aSizeRead: Integer; out AReply: IgoMongoReply)
-      : tgoReplyValidationResult;
-
-    class function ValidateMessage(const ABuffer: tBytes; const ASize: Integer; var aSizeRead: Integer; out AReply: IgoMongoReply)
-      : tgoReplyValidationResult;
+    class function ValidateMessage(const ABuffer: tBytes; const ASize: Integer; var aSizeRead: Integer; out AReply: IgoMongoReply):
+      tgoReplyValidationResult;
 
     procedure ReadData(const ABuffer: Pointer; const ASize: Integer);
     constructor Create(const ABuffer: Pointer; const ASize: Integer);
@@ -405,6 +406,97 @@ class destructor TgoMongoProtocol.Destroy;
 begin
   FreeAndNil(FClientSocketManager);
 end;
+
+
+constructor TgoMongoProtocol.Create(const AHost: string; const APort: Integer; const ASettings: TgoMongoProtocolSettings);
+begin
+  Assert(AHost <> '');
+  Assert(APort <> 0);
+  inherited Create;
+  FHost := AHost;
+  FPort := APort;
+  FMaxWriteBatchSize := DEF_MAX_BULK_SIZE;
+  FMaxMessageSizeBytes := DEF_MAX_MSG_SIZE; // 2 x maximum message size of 16 mb
+  FSettings := ASettings;
+  FConnectionLock := TCriticalSection.Create;
+  FRepliesLock := TCriticalSection.Create;
+  FRecvBufferLock := TCriticalSection.Create;
+  FCompletedReplies := TDictionary<Integer, IgoMongoReply>.Create;
+  FPartialReplies := TDictionary<Integer, tStopWatch>.Create;
+  SetLength(FRecvBuffer, RECV_BUFFER_SIZE);
+  Connect;  //This does initial handshake and may throw an exception. We could omit it here.
+end;
+
+
+destructor TgoMongoProtocol.Destroy;
+var
+  Connection: TgoSocketConnection;
+begin
+  if (FConnectionLock <> nil) then
+  begin
+    FConnectionLock.Acquire;
+    try
+      Connection := FConnection;
+      FConnection := nil;
+    finally
+      FConnectionLock.Release;
+    end;
+  end
+  else
+  begin
+    Connection := FConnection;
+    FConnection := nil;
+  end;
+
+  if (Connection <> nil) and (FClientSocketManager <> nil) then
+    FClientSocketManager.Release(Connection);
+
+  if (FRepliesLock <> nil) then
+  begin
+    FRepliesLock.Acquire;
+    try
+      FCompletedReplies.Free;
+      FPartialReplies.Free;
+    finally
+      FRepliesLock.Release;
+    end;
+  end;
+
+  FRepliesLock.Free;
+  FConnectionLock.Free;
+  FRecvBufferLock.Free;
+  inherited;
+end;
+
+
+//Returns the current state of the connection
+function TgoMongoProtocol.ConnectionState: TgoConnectionState;
+begin
+  FConnectionLock.Acquire;
+  try
+    if (FConnection <> nil) then
+      result := FConnection.State
+    else
+      result := TgoConnectionState.Disconnected;
+  finally
+    FConnectionLock.Release;
+  end;
+end;
+
+// Are we connected NOW ?
+function TgoMongoProtocol.IsConnected: Boolean;
+begin
+  result := (ConnectionState = TgoConnectionState.Connected);
+end;
+
+// Check if we're connected, try to autoconnect if necessary.
+function TgoMongoProtocol.EnsureConnected: Boolean;
+begin
+  result := (ConnectionState = TgoConnectionState.Connected);
+  if (not result) then
+    result := Connect;
+end;
+
 
 function TgoMongoProtocol.saslStart(const APayload: string): IgoMongoReply;
 var
@@ -557,6 +649,10 @@ begin
   end;
 end;
 
+
+//Connect: Builds the connection, does SSL and authentication optionally, does initialHandshake()
+//Only throws an exception if username and password are wrong.
+
 function TgoMongoProtocol.Connect: Boolean;
 var
   Connection: TgoSocketConnection;
@@ -622,92 +718,154 @@ begin
     if ConnectionState <> TgoConnectionState.Connected then
       Exit(False);
 
-    result := True;
+    result := True; //connected!
   end;
 
   { Always check this, because credentials may have changed }
   if FSettings.AuthMechanism <> TgoMongoAuthMechanism.None then
   begin
     { SCRAM Authenticate }
-    if not Authenticate then
+    if not Authenticate() then
       raise EgoMongoDBConnectionError.Create(Format(RS_MONGODB_AUTHENTICATION_ERROR, [FAuthErrorCode, FAuthErrorMessage]));
   end;
-end;
 
-function TgoMongoProtocol.ConnectionState: TgoConnectionState;
-begin
-  FConnectionLock.Acquire;
-  try
-    if (FConnection <> nil) then
-      result := FConnection.State
-    else
-      result := TgoConnectionState.Disconnected;
-  finally
-    FConnectionLock.Release;
-  end;
-end;
-
-constructor TgoMongoProtocol.Create(const AHost: string; const APort: Integer; const ASettings: TgoMongoProtocolSettings);
-begin
-  Assert(AHost <> '');
-  Assert(APort <> 0);
-  inherited Create;
-  FHost := AHost;
-  FPort := APort;
-  FMaxWriteBatchSize := DEF_MAX_BULK_SIZE;
-  FMaxMessageSizeBytes := DEF_MAX_MSG_SIZE; // 2 x maximum message size of 16 mb
-  FSettings := ASettings;
-  FConnectionLock := TCriticalSection.Create;
-  FRepliesLock := TCriticalSection.Create;
-  FRecvBufferLock := TCriticalSection.Create;
-  FCompletedReplies := TDictionary<Integer, IgoMongoReply>.Create;
-  FPartialReplies := TDictionary<Integer, tStopWatch>.Create;
-  SetLength(FRecvBuffer, RECV_BUFFER_SIZE);
   InitialHandshake;
 end;
 
-destructor TgoMongoProtocol.Destroy;
+
+//The "initialhandshake" tells the server what our capabilities are and queries its capabilities.
+procedure TgoMongoProtocol.InitialHandshake;
 var
-  Connection: TgoSocketConnection;
+  Writer: IgoBsonWriter;
+  Reply: IgoMongoReply;
+  Doc: TgoBsonDocument;
+  Compressions: tgoBsonArray;
+  value: tgobsonvalue;
+  debug: string;
+  I: Integer;
 begin
-  if (FConnectionLock <> nil) then
+  inc(fhandshakeRecursion);  //recursion protection
+  if fHandshakeRecursion = 1 then
   begin
-    FConnectionLock.Acquire;
+    FMaxWireVersion := 1;
+    FMinWireVersion := 1;
+    FMaxWriteBatchSize := DEF_MAX_BULK_SIZE;
+    FMaxMessageSizeBytes := DEF_MAX_MSG_SIZE;
+    fknowsZlib := False;
+    fknowsSnappy := False;
     try
-      Connection := FConnection;
-      FConnection := nil;
-    finally
-      FConnectionLock.Release;
+    // https://github.com/mongodb/specifications/blob/master/source/mongodb-handshake/handshake.rst
+    { isMaster is the deprecated LEGACY version of the hello command. }
+      Writer := TgoBsonWriter.Create;
+
+    // ***************** main doc {
+      Writer.WriteStartDocument;
+      Writer.WriteInt32('hello', 1);
+      Writer.WriteString('$db', DB_ADMIN);
+
+    // client {
+      Writer.WriteStartDocument('client');
+      if FSettings.ApplicationName <> '' then
+      begin
+      // application {
+        Writer.WriteStartDocument('application');
+        Writer.WriteString('name', FSettings.ApplicationName);
+        Writer.WriteEndDocument; // application}
+      end;
+
+    // driver {
+      Writer.WriteStartDocument('driver');
+      Writer.WriteString('name', 'Grijjy for Delphi/modified');
+      Writer.WriteString('version', '2.0 beta');
+      Writer.WriteEndDocument; // driver}
+
+    // os {
+      Writer.WriteStartDocument('os');
+      case tosVersion.platform of
+        tosVersion.tplatform.pfwindows:
+          Writer.WriteString('type', 'Windows');
+        tosVersion.tplatform.pfMacOS:
+          Writer.WriteString('type', 'Darwin');
+      else
+        Writer.WriteString('type', 'Linux');
+      end;
+      Writer.WriteString('name', tosVersion.Name);
+      case tosVersion.architecture of
+        tosVersion.tarchitecture.arIntelX86:
+          Writer.WriteString('architecture', 'x86');
+        tosVersion.tarchitecture.arIntelX64:
+          Writer.WriteString('architecture', 'x86_64');
+        tosVersion.tarchitecture.arArm32:
+          Writer.WriteString('architecture', 'arm');
+      else
+        Writer.WriteString('architecture', 'arm64');
+      end;
+      Writer.WriteString('version', Format('%d.%d.%d', [tosVersion.Major, tosVersion.Minor, tosVersion.Build]));
+      Writer.WriteEndDocument; // os}
+      Writer.WriteString('platform', 'Delphi');
+      Writer.WriteEndDocument; // client}
+
+      if (FSettings.UseSnappyCompression and Snappy_Implemented) or (FSettings.UseZlibCompression and ZLIB_Implemented) then
+      begin
+        Writer.WriteStartarray('compression');
+        if (FSettings.UseSnappyCompression and Snappy_Implemented) then
+          Writer.WriteString('snappy');
+        if (FSettings.UseZlibCompression and ZLIB_Implemented) then
+          Writer.WriteString('zlib');
+        Writer.WriteEndArray { compression };
+        Writer.WriteEndDocument; // main doc}
+      end;
+
+      Reply := OpMsg(False, Writer.ToBson, nil);    //Do not compress.  OpMSG() connects if necessary
+
+      if Assigned(Reply) then
+      begin
+        Doc := Reply.FirstDoc;
+        if not Doc.IsNil then
+        begin
+          debug := Doc.ToJson;
+
+          if Doc.Contains('maxWireVersion') then
+            FMaxWireVersion := Doc['maxWireVersion'].AsInteger;
+          if Doc.Contains('minWireVersion') then
+            FMinWireVersion := Doc['minWireVersion'].AsInteger;
+          if Doc.Contains('MaxWriteBatchSize') then
+            FMaxWriteBatchSize := MAX(Doc['maxWriteBatchSize'].AsInteger, DEF_MAX_BULK_SIZE);
+          if Doc.Contains('maxMessageSizeBytes') then
+            FMaxMessageSizeBytes := MAX(Doc['maxMessageSizeBytes'].AsInteger, DEF_MAX_MSG_SIZE);
+
+          if Doc.Contains('compression') then
+          begin
+            Compressions := Doc['compression'].AsBsonArray;
+            for I := 0 to Compressions.Count - 1 do
+            begin
+              value := Compressions[I];
+              if value.IsString then
+              begin
+                if value.AsString = 'snappy' then
+                  fknowsSnappy := True;
+                if value.AsString = 'zlib' then
+                  fknowsZlib := True;
+              end;
+            end;
+          end;
+        end;
+      end;
+    except
+    // ignore
     end;
-  end
-  else
-  begin
-    Connection := FConnection;
-    FConnection := nil;
   end;
-
-  if (Connection <> nil) and (FClientSocketManager <> nil) then
-    FClientSocketManager.Release(Connection);
-
-  if (FRepliesLock <> nil) then
-  begin
-    FRepliesLock.Acquire;
-    try
-      FCompletedReplies.Free;
-      FPartialReplies.Free;
-    finally
-      FRepliesLock.Release;
-    end;
-  end;
-
-  FRepliesLock.Free;
-  FConnectionLock.Free;
-  FRecvBufferLock.Free;
-  inherited;
+  dec(fHandshakeRecursion);
 end;
 
-class function tMsgPayload.ReadBsonDoc(TestMode: Boolean; out Bson: tBytes; buffer: Pointer; BytesAvail: Integer; var BytesRead: Integer)
-  : tgoPayloadDecodeResult;
+
+
+
+
+
+
+class function tMsgPayload.ReadBsonDoc(TestMode: Boolean; out Bson: tBytes; buffer: Pointer; BytesAvail: Integer; var BytesRead: Integer):
+  tgoPayloadDecodeResult;
 var
   DocSize: Integer;
 begin
@@ -739,8 +897,8 @@ end;
   !!! There is no ordering implied by payload types.!!!
   !!! A section with payload type 1 can be serialized before payload type 0!!! }
 
-class function tMsgPayload.DecodeSequence(TestMode: Boolean; SeqStart: Pointer; SizeAvail: Integer; var SizeRead: Integer;
-  var PayloadType: Byte; var Name: string; var data: TArray<tBytes>): tgoPayloadDecodeResult;
+class function tMsgPayload.DecodeSequence(TestMode: Boolean; SeqStart: Pointer; SizeAvail: Integer; var SizeRead: Integer; var PayloadType:
+  Byte; var Name: string; var data: TArray<tBytes>): tgoPayloadDecodeResult;
 
 { SeqStart: Start of the section, first byte that follows is the PayloadType
   SizeAvail: Available size from SeqStart to the end of the buffer
@@ -808,7 +966,7 @@ var
 
 begin
   result := tgoPayloadDecodeResult.pdEOF;
-  name := '';
+  Name := '';
   offs := 0;
   SizeRead := 0;
   SetLength(data, 0);
@@ -846,7 +1004,7 @@ begin
                 SetLength(Cstring, length(Cstring) + 1); // dumb append of byte
                 Cstring[length(Cstring)] := c;
               end; // while
-              name := string(Cstring);
+              Name := string(Cstring);
 
               result := tgoPayloadDecodeResult.pdOK; // the specs say "0 or more" BSON documents, so 0 is acceptable
 
@@ -882,6 +1040,11 @@ begin
     SizeRead := sizeof(Byte) + PayloadSize; // Should be identical with offs
 end;
 
+function tgoMongoProtocol.KnowsCompression: Boolean;
+begin
+  result := fKnowsSnappy or fKnowsZlib;
+end;
+
 procedure TgoMongoProtocol.Compress(var Packet: tBytes);
 var
   h: PMsgHeader;
@@ -889,165 +1052,42 @@ var
   DataSize, compressedsize: Integer;
   Output: tBytes;
 begin
-  h := @Packet[0];
-  DataSize := h.DataSize;
-
-  if fknowsSnappy then
+  if KnowsCompression then
   begin
-    if tSnappycompressor.Compress(h.DataStart, DataSize, compressedsize, Output) then
+    h := @Packet[0];
+    DataSize := h.DataSize;
+    if fknowsSnappy then
     begin
-      SetLength(Packet, sizeof(TOPCompressedHeader) + length(Output));
-      q := @Packet[0];
-      q.OriginalOpCode := q.Header.OpCode;
-      q.Header.OpCode := OP_COMPRESSED;
-      q.Header.MessageLength := length(Packet);
-      q.UncompressedSize := DataSize;
-      q.CompressorID := 1; // snappy;
-      move(Output[0], q.DataStart^, length(Output));
-    end;
-  end
-  else if fknowsZlib then
-  begin
-    if tZlibCompressor.Compress(h.DataStart, DataSize, compressedsize, Output) then
-    begin
-      SetLength(Packet, sizeof(TOPCompressedHeader) + length(Output));
-      q := @Packet[0];
-      q.OriginalOpCode := q.Header.OpCode;
-      q.Header.OpCode := OP_COMPRESSED;
-      q.Header.MessageLength := length(Packet);
-      q.UncompressedSize := DataSize;
-      q.CompressorID := 2; // zlib;
-      move(Output[0], q.DataStart^, length(Output));
-    end;
-  end;
-
-end;
-
-procedure TgoMongoProtocol.InitialHandshake;
-var
-  Writer: IgoBsonWriter;
-  Reply: IgoMongoReply;
-  Doc: TgoBsonDocument;
-  Compressions: tgoBsonArray;
-  value: tgobsonvalue;
-  debug: string;
-  I: Integer;
-begin
-  FMaxWireVersion := 1;
-  FMinWireVersion := 1;
-  FMaxWriteBatchSize := DEF_MAX_BULK_SIZE;
-  FMaxMessageSizeBytes := DEF_MAX_MSG_SIZE;
-  fknowsZlib := False;
-  fknowsSnappy := False;
-
-  try
-    // https://github.com/mongodb/specifications/blob/master/source/mongodb-handshake/handshake.rst
-    { isMaster is the deprecated LEGACY version of the hello command. }
-    Writer := TgoBsonWriter.Create;
-
-    // ***************** main doc {
-    Writer.WriteStartDocument;
-    Writer.WriteInt32('hello', 1);
-    Writer.WriteString('$db', DB_ADMIN);
-
-    // client {
-    Writer.WriteStartDocument('client');
-    if FSettings.ApplicationName <> '' then
-    begin
-      // application {
-      Writer.WriteStartDocument('application');
-      Writer.WriteString('name', FSettings.ApplicationName);
-      Writer.WriteEndDocument; // application}
-    end;
-
-    // driver {
-    Writer.WriteStartDocument('driver');
-    Writer.WriteString('name', 'Grijjy for Delphi/modified');
-    Writer.WriteString('version', '2.0 beta');
-    Writer.WriteEndDocument; // driver}
-
-    // os {
-    Writer.WriteStartDocument('os');
-    case tosVersion.Platform of
-      tosVersion.tplatform.pfwindows:
-        Writer.WriteString('type', 'Windows');
-      tosVersion.tplatform.pfMacOS:
-        Writer.WriteString('type', 'Darwin');
-    else
-      Writer.WriteString('type', 'Linux');
-    end;
-    Writer.WriteString('name', tosVersion.Name);
-    case tosVersion.architecture of
-      tosVersion.tarchitecture.arIntelX86:
-        Writer.WriteString('architecture', 'x86');
-      tosVersion.tarchitecture.arIntelX64:
-        Writer.WriteString('architecture', 'x86_64');
-      tosVersion.tarchitecture.arArm32:
-        Writer.WriteString('architecture', 'arm');
-    else
-      Writer.WriteString('architecture', 'arm64');
-    end;
-    Writer.WriteString('version', Format('%d.%d.%d', [tosVersion.Major, tosVersion.Minor, tosVersion.Build]));
-    Writer.WriteEndDocument; // os}
-    Writer.WriteString('platform', 'Delphi');
-    Writer.WriteEndDocument; // client}
-
-    if (FSettings.UseSnappyCompression and Snappy_Implemented) or (FSettings.UseZlibCompression and ZLIB_Implemented) then
-    begin
-      Writer.WriteStartarray('compression');
-      if (FSettings.UseSnappyCompression and Snappy_Implemented) then
-        Writer.WriteString('snappy');
-      if (FSettings.UseZlibCompression and ZLIB_Implemented) then
-        Writer.WriteString('zlib');
-      Writer.WriteEndArray { compression };
-      Writer.WriteEndDocument; // main doc}
-    end;
-
-    Reply := OpMsg(False, Writer.ToBson, nil);
-    if Assigned(Reply) then
-    begin
-      Doc := Reply.FirstDoc;
-      if not Doc.IsNil then
+      if tSnappycompressor.Compress(h.DataStart, DataSize, compressedsize, Output) then
       begin
-        debug := Doc.ToJson;
-
-        if Doc.Contains('maxWireVersion') then
-          FMaxWireVersion := Doc['maxWireVersion'].AsInteger;
-        if Doc.Contains('minWireVersion') then
-          FMinWireVersion := Doc['minWireVersion'].AsInteger;
-        if Doc.Contains('MaxWriteBatchSize') then
-          FMaxWriteBatchSize := MAX(Doc['maxWriteBatchSize'].AsInteger, DEF_MAX_BULK_SIZE);
-        if Doc.Contains('maxMessageSizeBytes') then
-          FMaxMessageSizeBytes := MAX(Doc['maxMessageSizeBytes'].AsInteger, DEF_MAX_MSG_SIZE);
-
-        if Doc.Contains('compression') then
-        begin
-          Compressions := Doc['compression'].AsBsonArray;
-          for I := 0 to Compressions.Count - 1 do
-          begin
-            value := Compressions[I];
-            if value.IsString then
-            begin
-              if value.AsString = 'snappy' then
-                fknowsSnappy := True;
-              if value.AsString = 'zlib' then
-                fknowsZlib := True;
-            end;
-          end;
-        end;
+        SetLength(Packet, sizeof(TOPCompressedHeader) + length(Output));
+        q := @Packet[0];
+        q.OriginalOpCode := q.Header.OpCode;
+        q.Header.OpCode := OP_COMPRESSED;
+        q.Header.MessageLength := length(Packet);
+        q.UncompressedSize := DataSize;
+        q.CompressorID := 1; // snappy;
+        move(Output[0], q.DataStart^, length(Output));
+      end;
+    end
+    else if fknowsZlib then
+    begin
+      if tZlibCompressor.Compress(h.DataStart, DataSize, compressedsize, Output) then
+      begin
+        SetLength(Packet, sizeof(TOPCompressedHeader) + length(Output));
+        q := @Packet[0];
+        q.OriginalOpCode := q.Header.OpCode;
+        q.Header.OpCode := OP_COMPRESSED;
+        q.Header.MessageLength := length(Packet);
+        q.UncompressedSize := DataSize;
+        q.CompressorID := 2; // zlib;
+        move(Output[0], q.DataStart^, length(Output));
       end;
     end;
-  except
-    // ignore
   end;
 end;
 
-function TgoMongoProtocol.IsConnected: Boolean;
-begin
-  result := (ConnectionState = TgoConnectionState.Connected);
-  if (not result) then
-    result := Connect;
-end;
+
 
 function TgoMongoProtocol.LastPartialReply(const ARequestId: Integer; out ALastRecv: tStopWatch): Boolean;
 begin
@@ -1078,54 +1118,64 @@ var
   I: Integer;
   T: tBytes;
   paramtype: Byte;
+  AutoReConnected: Boolean;
 begin
   if length(ParamType0) = 0 then
     raise EgoMongoDBError.Create('Mandatory document of PayloadType 0 missing in OpMsg');
-  MsgHeader.Header.RequestID := AtomicIncrement(FNextRequestId);
-  MsgHeader.Header.ResponseTo := 0;
-  MsgHeader.Header.OpCode := OP_MSG;
-  if NoResponse then
-    MsgHeader.flagbits := [TGoMongoMsgFlag.msgfMoreToCome]
-  else
-    MsgHeader.flagbits := [];
 
-  data := tgoByteBuffer.Create;
-  try
-    data.AppendBuffer(MsgHeader, sizeof(MsgHeader));
+  if EnsureConnected() {Auto-reconnect if needed!} then
+  begin
+    MsgHeader.Header.RequestID := AtomicIncrement(FNextRequestId);
+    MsgHeader.Header.ResponseTo := 0;
+    MsgHeader.Header.OpCode := OP_MSG;
+    if NoResponse then
+      MsgHeader.flagbits := [TGoMongoMsgFlag.msgfMoreToCome]
+    else
+      MsgHeader.flagbits := [];
+
+    data := tgoByteBuffer.Create;
+    try
+      data.AppendBuffer(MsgHeader, sizeof(MsgHeader));
     // Append section of PayloadType 0, that contains the first document.
     // Every op_msg MUST have ONE section of payload type 0.
     // this is the standard command document, like {"insert": "collection"},
     // plus write concern and other command arguments.
 
-    paramtype := 0;
-    data.Append(paramtype);
-    data.Append(ParamType0);
+      paramtype := 0;
+      data.Append(paramtype);
+      data.Append(ParamType0);
 
     // Some parameters may be dis-embedded from the first document and simply appended as sections of Payload Type 1,
     // see https://github.com/mongodb/specifications/blob/master/source/message/OP_MSG.rst#command-arguments-as-payload
 
-    for I := 0 to high(ParamsType1) do
-      ParamsType1[I].WriteTo(data);
+      for I := 0 to high(ParamsType1) do
+        ParamsType1[I].WriteTo(data);
 
     { TODO : optional Checksum }
 
     // update message length in header
-    pHeader := @data.buffer[0];
-    pHeader.Header.MessageLength := data.Size;
-    T := data.ToBytes;
+      pHeader := @data.buffer[0];
+      pHeader.Header.MessageLength := data.Size;
+      T := data.ToBytes;
 
-    if CompressionAllowed { and (length(T) > 256) } then
-      Compress(T);
+      //Compression also implies that the ANSWER will be compressed by the server !
+      if CompressionAllowed and KnowsCompression then
+        Compress(T);
 
-    Send(T);
-  finally
-    FreeAndNil(data);
-  end;
+      Send(T); //Send() no longer auto-connects
+    finally
+      FreeAndNil(data);
+    end;
 
-  if not NoResponse then
-    result := WaitForReply(MsgHeader.Header.RequestID)
+    if not NoResponse then
+      result := WaitForReply(MsgHeader.Header.RequestID)
+    else
+      result := nil;
+
+  end
   else
-    result := nil;
+    raise EgoMongoDBConnectionError.Create('Connection Failed');
+
 end;
 
 function TgoMongoProtocol.HaveReplyMsgHeader(out AMsgHeader): Boolean;
@@ -1143,17 +1193,14 @@ begin
   end;
 end;
 
-procedure TgoMongoProtocol.Send(const adata: tBytes);
+procedure TgoMongoProtocol.Send(const adata: tBytes);//Send() is ONLY called from OP_MSG
 begin
-  if IsConnected then
-  begin
-    FConnectionLock.Acquire;
-    try
-      if (FConnection <> nil) then
-        FConnection.Send(adata);
-    finally
-      FConnectionLock.Release;
-    end;
+  FConnectionLock.Acquire;
+  try
+    if (FConnection <> nil) then
+      FConnection.Send(adata);
+  finally
+    FConnectionLock.Release;
   end;
 end;
 
@@ -1428,8 +1475,8 @@ end;
 
 // Validate a message in OP_MSG format
 
-class function TgoMongoMsgReply.ValidateOPMessage(const ABuffer: tBytes; const ASize: Integer; var aSizeRead: Integer;
-  out AReply: IgoMongoReply): tgoReplyValidationResult;
+class function TgoMongoMsgReply.ValidateOPMessage(const ABuffer: tBytes; const ASize: Integer; var aSizeRead: Integer; out AReply:
+  IgoMongoReply): tgoReplyValidationResult;
 var
   DocBuf: TArray<tBytes>;
   data: Pointer;
@@ -1525,9 +1572,8 @@ begin
   end;
 end;
 
-class function TgoMongoMsgReply.ValidateMessage(const ABuffer: tBytes; const ASize: Integer; var aSizeRead: Integer;
-  out AReply: IgoMongoReply): tgoReplyValidationResult;
-
+class function TgoMongoMsgReply.ValidateMessage(const ABuffer: tBytes; const ASize: Integer; var aSizeRead: Integer; out AReply:
+  IgoMongoReply): tgoReplyValidationResult;
 var
   Source: POPCompressedHeader;
   Target: PMsgHeader;
@@ -1629,3 +1675,4 @@ end;
 initialization
 
 end.
+

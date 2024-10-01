@@ -833,7 +833,7 @@ type
     function getHost: string;
     function getPort: Integer;
     function GetAvailableClient: igoMongoClient; //grabs an available client connection from the pool.
-    procedure ReleaseToPool(const Client: igoMongoClient);//Releases the connection back to the pool
+    procedure ReleaseToPool(const Client: igoMongoClient); //Releases the connection back to the pool
     procedure ClearAll; //Removes ALL connections;
     procedure Purge; //Deletes currently unused connections
     property ConnectionSettings: tgoMongoClientSettings read GetConnectionSettings;
@@ -864,7 +864,6 @@ type
     property Port: integer read getPort;
   end;
 
-
 type
   {tgoCursorhelper can determine if a BSON DOC contains a cursor and create an igoMongoCursor from it}
   tgoCursorhelper = class
@@ -880,9 +879,6 @@ type
 
     class function FirstDoc(const Docs: tArray<tgoBsonDocument>): tgoBsonDocument;
   end;
-
-
-
 
 resourcestring
   RS_MONGODB_CONNECTION_ERROR = 'Error connecting to the MongoDB database';
@@ -3053,10 +3049,13 @@ end;
 
 {Get an available client connection from the connection pool and make it unavailable}
 
+{.define Nolock}
+
 function tgoConnectionPool.GetAvailableClient: igoMongoClient;
 var
   item: igoMongoClient;
 begin
+  result := NIL;
   repeat
     flock.Acquire;
       //Find the first available connection
@@ -3069,17 +3068,34 @@ begin
       end;
 
       //No free connections available ? Create a new one if allowed.
+
     if (flist.Count < fmaxitems) then
     begin
+     {$ifdef nolock}
+       {Yes this is flawed - but if we don't unlock the pool, it could
+       hang for a minute If the server is unreachable because
+       TgoMongoProtocol  tries to connect immediately in the constructor.
+       We'd rather accept that the pool may have a few items too many.}
+      flock.release; //unlock the pool
+      item := tgoMongoClient.create(fHost, fPort, fConnectionSettings);  // May throw exception if connection fails
+      item.Pooled := True;
+      item.Available := False;
+      flock.acquire;
+      flist.Add(item);
+      flock.release;
+      exit(item);
+      {$else}
       try
-        item := tgoMongoClient.create(fHost, fPort, fConnectionSettings);  //Does handshake - May throw exception if connection fails
-        flist.Add(item);
+        //lock is active
+        item := tgoMongoClient.create(fHost, fPort, fConnectionSettings);  // May throw exception if connection fails
         item.Pooled := True;
-        item.Available := False;    //Mark it "in use" and return the item
+        item.Available := False;
+        flist.Add(item);
         exit(item);
       finally
         flock.release;
       end;
+      {$endif}
     end
     else  //Max number of connections reached - sleep until one becomes available.
     begin
@@ -3162,9 +3178,6 @@ begin
   If the connections are not referenced anywhere they will be freed here.
   It may cost some time but the list isn't locked.}
 end;
-
-
-
 
 procedure tgoConnectionPool.ReleaseToPool(const Client: igoMongoClient);
 begin
