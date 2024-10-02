@@ -208,23 +208,25 @@ type
     function saslStart(const APayload: string): IgoMongoReply;
     function saslContinue(const AConversationId: Integer; const APayload: string): IgoMongoReply;
     function Authenticate: Boolean;
-
+    {feature handshake}
+    procedure Hello;
     { Connection }
+    procedure Disconnect;
     function Connect: Boolean;
-    function IsConnected: Boolean;
+    function ConnectionState: TgoConnectionState;
+    function GetConnected: Boolean;
+    procedure SetConnected(Value: Boolean);
     function EnsureConnected: Boolean;
 
-    function ConnectionState: TgoConnectionState; inline;
+
   private
     { Socket events }
     procedure SocketConnected;
     procedure SocketDisconnected;
     procedure SocketRecv(const ABuffer: Pointer; const ASize: Integer);
-    procedure InitialHandshake;
     procedure RemoveReply(const ARequestId: Integer);
     procedure UpdateReplyTimeout(const ARequestId: Integer);
     procedure Compress(var Packet: tBytes);
-
   public
     function KnowsCompression: Boolean;
     function ThisMoment: tStopWatch;
@@ -247,8 +249,6 @@ type
     function OpMsg(CompressionAllowed: Boolean; const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>; NoResponse: Boolean =
       False): IgoMongoReply; overload;
 
-    function SupportsOpMsg: Boolean;
-
   public
     { Authenticate error message if failed }
     property AuthErrorMessage: string read FAuthErrorMessage;
@@ -260,6 +260,7 @@ type
     property MaxWriteBatchSize: Integer read FMaxWriteBatchSize write FMaxWriteBatchSize;
     property MaxMessageSizeBytes: Integer read FMaxMessageSizeBytes write FMaxMessageSizeBytes;
     property GlobalReadPreference: tgoMongoReadPreference read FSettings.GlobalReadPreference write FSettings.GlobalReadPreference;
+    property Connected: Boolean read GetConnected write SetConnected;
   end;
 
 resourcestring
@@ -407,7 +408,6 @@ begin
   FreeAndNil(FClientSocketManager);
 end;
 
-
 constructor TgoMongoProtocol.Create(const AHost: string; const APort: Integer; const ASettings: TgoMongoProtocolSettings);
 begin
   Assert(AHost <> '');
@@ -424,49 +424,19 @@ begin
   FCompletedReplies := TDictionary<Integer, IgoMongoReply>.Create;
   FPartialReplies := TDictionary<Integer, tStopWatch>.Create;
   SetLength(FRecvBuffer, RECV_BUFFER_SIZE);
-  Connect;  //This does initial handshake and may throw an exception. We could omit it here.
+  //No longer do connect() in the constructor
 end;
 
-
 destructor TgoMongoProtocol.Destroy;
-var
-  Connection: TgoSocketConnection;
 begin
-  if (FConnectionLock <> nil) then
-  begin
-    FConnectionLock.Acquire;
-    try
-      Connection := FConnection;
-      FConnection := nil;
-    finally
-      FConnectionLock.Release;
-    end;
-  end
-  else
-  begin
-    Connection := FConnection;
-    FConnection := nil;
-  end;
-
-  if (Connection <> nil) and (FClientSocketManager <> nil) then
-    FClientSocketManager.Release(Connection);
-
-  if (FRepliesLock <> nil) then
-  begin
-    FRepliesLock.Acquire;
-    try
-      FCompletedReplies.Free;
-      FPartialReplies.Free;
-    finally
-      FRepliesLock.Release;
-    end;
-  end;
-
+  Disconnect;
   FRepliesLock.Free;
   FConnectionLock.Free;
   FRecvBufferLock.Free;
   inherited;
 end;
+
+
 
 
 //Returns the current state of the connection
@@ -484,19 +454,30 @@ begin
 end;
 
 // Are we connected NOW ?
-function TgoMongoProtocol.IsConnected: Boolean;
+function TgoMongoProtocol.GetConnected: Boolean;
 begin
   result := (ConnectionState = TgoConnectionState.Connected);
 end;
 
-// Check if we're connected, try to autoconnect if necessary.
+// Change connection status
+procedure TgoMongoProtocol.SetConnected(Value: Boolean);
+begin
+  if Value <> Connected then
+  begin
+    if Value then
+      connect
+    else
+      disconnect;
+  end;
+end;
+
+// Check if we're connected, autoconnect if necessary.
 function TgoMongoProtocol.EnsureConnected: Boolean;
 begin
-  result := (ConnectionState = TgoConnectionState.Connected);
+  result := Connected;
   if (not result) then
     result := Connect;
 end;
-
 
 function TgoMongoProtocol.saslStart(const APayload: string): IgoMongoReply;
 var
@@ -649,27 +630,65 @@ begin
   end;
 end;
 
+procedure tgoMongoProtocol.Disconnect;
+var
+  OldConnection: TgoSocketConnection;
+  WasConnected: Boolean;
+begin
+  WasConnected := GetConnected;
 
-//Connect: Builds the connection, does SSL and authentication optionally, does initialHandshake()
+  FConnectionLock.Acquire;
+  try
+    OldConnection := FConnection;
+    FConnection := nil;
+  finally
+    FConnectionLock.Release;
+  end;
+
+  if (OldConnection <> nil) then
+  begin
+    if (FClientSocketManager <> nil) and WasConnected then //release open connection to pool
+      FClientSocketManager.Release(OldConnection) //This also stops all callbacks
+    else
+    begin
+      //Do not return a disconnected/broken connection to the pool
+      OldConnection.StopCallbacks;
+      OldConnection.Free;
+    end;
+  end;
+
+  FRepliesLock.Acquire;
+  try
+    FCompletedReplies.Free;
+    FPartialReplies.Free;
+  finally
+    FRepliesLock.Release;
+  end;
+end;
+
+
+
+
+//Connect: Builds the OldConnection, does SSL and authentication optionally, does Hello()
 //Only throws an exception if username and password are wrong.
 
 function TgoMongoProtocol.Connect: Boolean;
 var
-  Connection: TgoSocketConnection;
+  OldConnection: TgoSocketConnection;
 
   procedure WaitForConnected;
   var
     aNow: tStopWatch;
   begin
     aNow := ThisMoment;
-    while (aNow.ElapsedMilliseconds < FSettings.ConnectionTimeout) and (FConnection.State <> TgoConnectionState.Connected) do
+    while (aNow.ElapsedMilliseconds < FSettings.ConnectionTimeout) and (Not Connected) do
       Sleep(5);
   end;
 
 begin
   FConnectionLock.Acquire;
   try
-    Connection := FConnection;
+    OldConnection := FConnection;
     FConnection := FClientSocketManager.Request(FHost, FPort);
     if Assigned(FConnection) then
     begin
@@ -681,15 +700,17 @@ begin
     FConnectionLock.Release;
   end;
 
-  { Release the last connection }
-  if (Connection <> nil) then
-    FClientSocketManager.Release(Connection);
+  { Release the Old Connection }
+  if (OldConnection <> nil) then
+    FClientSocketManager.Release(OldConnection);
 
   { Shutting down }
   if not Assigned(FConnection) then
     Exit(False);
 
-  result := (ConnectionState = TgoConnectionState.Connected);
+
+  {Was the new connection obtained from the pool already connected?}
+  result := Connected;
   if (not result) then
   begin
     FConnectionLock.Acquire;
@@ -715,10 +736,10 @@ begin
       FConnectionLock.Release;
     end;
 
-    if ConnectionState <> TgoConnectionState.Connected then
-      Exit(False);
-
-    result := True; //connected!
+    if Not Connected then
+      Exit(False)
+    else
+      result := True; //connected!
   end;
 
   { Always check this, because credentials may have changed }
@@ -729,12 +750,12 @@ begin
       raise EgoMongoDBConnectionError.Create(Format(RS_MONGODB_AUTHENTICATION_ERROR, [FAuthErrorCode, FAuthErrorMessage]));
   end;
 
-  InitialHandshake;
+  Hello();
 end;
 
 
-//The "initialhandshake" tells the server what our capabilities are and queries its capabilities.
-procedure TgoMongoProtocol.InitialHandshake;
+//The "Hello" tells the server what our capabilities are and queries its capabilities.
+procedure TgoMongoProtocol.Hello;
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
@@ -816,7 +837,7 @@ begin
         Writer.WriteEndDocument; // main doc}
       end;
 
-      Reply := OpMsg(False, Writer.ToBson, nil);    //Do not compress.  OpMSG() connects if necessary
+      Reply := OpMsg(False, Writer.ToBson, nil);    //Do not compress.  OpMSG() autoconnects if necessary
 
       if Assigned(Reply) then
       begin
@@ -857,12 +878,6 @@ begin
   end;
   dec(fHandshakeRecursion);
 end;
-
-
-
-
-
-
 
 class function tMsgPayload.ReadBsonDoc(TestMode: Boolean; out Bson: tBytes; buffer: Pointer; BytesAvail: Integer; var BytesRead: Integer):
   tgoPayloadDecodeResult;
@@ -1087,8 +1102,6 @@ begin
   end;
 end;
 
-
-
 function TgoMongoProtocol.LastPartialReply(const ARequestId: Integer; out ALastRecv: tStopWatch): Boolean;
 begin
   FRepliesLock.Acquire;
@@ -1123,7 +1136,7 @@ begin
   if length(ParamType0) = 0 then
     raise EgoMongoDBError.Create('Mandatory document of PayloadType 0 missing in OpMsg');
 
-  if EnsureConnected() {Auto-reconnect if needed!} then
+  if EnsureConnected() then {=Auto-reconnect if needed!}
   begin
     MsgHeader.Header.RequestID := AtomicIncrement(FNextRequestId);
     MsgHeader.Header.ResponseTo := 0;
@@ -1214,11 +1227,6 @@ begin
   { Not interested (yet) }
 end;
 
-function TgoMongoProtocol.SupportsOpMsg: Boolean;
-begin
-  result := True; // (FMaxWireVersion >= 6);
-end;
-
 function TgoMongoProtocol.TryGetReply(const ARequestId: Integer; out AReply: IgoMongoReply): Boolean;
 begin
   FRepliesLock.Acquire;
@@ -1237,7 +1245,7 @@ begin
   { TODO : Handle per-request timeout as in findoptions.maxTimeMS }
   result := nil;
   Start := ThisMoment;
-  while (ConnectionState = TgoConnectionState.Connected) and (not TryGetReply(ARequestId, result)) do
+  while Connected and (not TryGetReply(ARequestId, result)) do
   begin
     if LastPartialReply(ARequestId, LastRecv) then // have partial reply ?
       ms := LastRecv.ElapsedMilliseconds // number of milliseconds "radiosilence" in large response

@@ -3049,7 +3049,6 @@ end;
 
 {Get an available client connection from the connection pool and make it unavailable}
 
-{.define Nolock}
 
 function tgoConnectionPool.GetAvailableClient: igoMongoClient;
 var
@@ -3071,20 +3070,6 @@ begin
 
     if (flist.Count < fmaxitems) then
     begin
-     {$ifdef nolock}
-       {Yes this is flawed - but if we don't unlock the pool, it could
-       hang for a minute If the server is unreachable because
-       TgoMongoProtocol  tries to connect immediately in the constructor.
-       We'd rather accept that the pool may have a few items too many.}
-      flock.release; //unlock the pool
-      item := tgoMongoClient.create(fHost, fPort, fConnectionSettings);  // May throw exception if connection fails
-      item.Pooled := True;
-      item.Available := False;
-      flock.acquire;
-      flist.Add(item);
-      flock.release;
-      exit(item);
-      {$else}
       try
         //lock is active
         item := tgoMongoClient.create(fHost, fPort, fConnectionSettings);  // May throw exception if connection fails
@@ -3095,7 +3080,6 @@ begin
       finally
         flock.release;
       end;
-      {$endif}
     end
     else  //Max number of connections reached - sleep until one becomes available.
     begin
