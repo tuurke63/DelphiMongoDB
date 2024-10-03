@@ -213,12 +213,10 @@ type
     { Connection }
     procedure Disconnect;
     function Connect: Boolean;
-    function ConnectionState: TgoConnectionState;
-    function GetConnected: Boolean;
+    function ConnectionState: TgoConnectionState; Inline;
+    function GetConnected: Boolean; Inline;
     procedure SetConnected(Value: Boolean);
     function EnsureConnected: Boolean;
-
-
   private
     { Socket events }
     procedure SocketConnected;
@@ -430,14 +428,13 @@ end;
 destructor TgoMongoProtocol.Destroy;
 begin
   Disconnect;
+  FCompletedReplies.Free;
+  FPartialReplies.Free;
   FRepliesLock.Free;
   FConnectionLock.Free;
   FRecvBufferLock.Free;
   inherited;
 end;
-
-
-
 
 //Returns the current state of the connection
 function TgoMongoProtocol.ConnectionState: TgoConnectionState;
@@ -453,13 +450,13 @@ begin
   end;
 end;
 
-// Are we connected NOW ?
+// Getter of property Connected
 function TgoMongoProtocol.GetConnected: Boolean;
 begin
   result := (ConnectionState = TgoConnectionState.Connected);
 end;
 
-// Change connection status
+// Setter of property Connected
 procedure TgoMongoProtocol.SetConnected(Value: Boolean);
 begin
   if Value <> Connected then
@@ -635,7 +632,7 @@ var
   OldConnection: TgoSocketConnection;
   WasConnected: Boolean;
 begin
-  WasConnected := GetConnected;
+  WasConnected := Connected;
 
   FConnectionLock.Acquire;
   try
@@ -659,8 +656,8 @@ begin
 
   FRepliesLock.Acquire;
   try
-    FCompletedReplies.Free;
-    FPartialReplies.Free;
+    FCompletedReplies.Clear;
+    FPartialReplies.Clear;
   finally
     FRepliesLock.Release;
   end;
