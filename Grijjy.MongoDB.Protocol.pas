@@ -182,6 +182,8 @@ type
     FConnectionLock: TCriticalSection;
     FCompletedReplies: TDictionary<Integer, IgoMongoReply>;
     FPartialReplies: TDictionary<Integer, tStopWatch>;
+    fReplyEvents: TDictionary<Integer, TEvent>;
+    fReplyEvent: tEvent; // currently only support request-response model, so need only one event
     FRepliesLock: TCriticalSection;
     FRecvBuffer: tBytes;
     FRecvSize: Integer;
@@ -193,11 +195,11 @@ type
     FMaxWriteBatchSize: Integer;
     FMaxMessageSizeBytes: Integer;
     fknowsZlib, fknowsSnappy: Boolean;
-    fHandShakeRecursion: Integer; //for handshaking
+    fHandShakeRecursion: Integer; //prevent recursive handshaking
   private
     procedure Send(const adata: tBytes);
     procedure Recover;
-    function WaitForReply(const ARequestId: Integer): IgoMongoReply;
+    function WaitForReply(const ARequestId: Integer; const aReplyEvent:tEvent): IgoMongoReply;
     function TryGetReply(const ARequestId: Integer; out AReply: IgoMongoReply): Boolean; inline;
     function LastPartialReply(const ARequestId: Integer; out ALastRecv: tStopWatch): Boolean;
 
@@ -213,8 +215,8 @@ type
     { Connection }
     procedure Disconnect;
     function Connect: Boolean;
-    function ConnectionState: TgoConnectionState; Inline;
-    function GetConnected: Boolean; Inline;
+    function ConnectionState: TgoConnectionState; inline;
+    function GetConnected: Boolean; inline;
     procedure SetConnected(Value: Boolean);
     function EnsureConnected: Boolean;
   private
@@ -421,6 +423,8 @@ begin
   FRecvBufferLock := TCriticalSection.Create;
   FCompletedReplies := TDictionary<Integer, IgoMongoReply>.Create;
   FPartialReplies := TDictionary<Integer, tStopWatch>.Create;
+  fReplyEvents := TDictionary<Integer, TEvent>.Create;
+  fReplyEvent := TEvent.Create(nil, True, False, ''); //Currently, only support request-response model
   SetLength(FRecvBuffer, RECV_BUFFER_SIZE);
   //No longer do connect() in the constructor
 end;
@@ -430,9 +434,11 @@ begin
   Disconnect;
   FCompletedReplies.Free;
   FPartialReplies.Free;
+  fReplyEvents.Free;
   FRepliesLock.Free;
   FConnectionLock.Free;
   FRecvBufferLock.Free;
+  fReplyEvent.Free;
   inherited;
 end;
 
@@ -658,6 +664,7 @@ begin
   try
     FCompletedReplies.Clear;
     FPartialReplies.Clear;
+    fReplyEvents.clear;
   finally
     FRepliesLock.Release;
   end;
@@ -678,7 +685,7 @@ var
     aNow: tStopWatch;
   begin
     aNow := ThisMoment;
-    while (aNow.ElapsedMilliseconds < FSettings.ConnectionTimeout) and (Not Connected) do
+    while (aNow.ElapsedMilliseconds < FSettings.ConnectionTimeout) and (not Connected) do
       Sleep(5);
   end;
 
@@ -733,7 +740,7 @@ begin
       FConnectionLock.Release;
     end;
 
-    if Not Connected then
+    if not Connected then
       Exit(False)
     else
       result := True; //connected!
@@ -1125,7 +1132,7 @@ var
   MsgHeader: TOPMSGHeader;
   pHeader: POpMsgHeader;
   data: tgoByteBuffer;
-  I: Integer;
+  I, RequestID: Integer;
   T: tBytes;
   paramtype: Byte;
   AutoReConnected: Boolean;
@@ -1135,7 +1142,8 @@ begin
 
   if EnsureConnected() then {=Auto-reconnect if needed!}
   begin
-    MsgHeader.Header.RequestID := AtomicIncrement(FNextRequestId);
+    RequestID := AtomicIncrement(FNextRequestId);
+    MsgHeader.Header.RequestID := RequestID;
     MsgHeader.Header.ResponseTo := 0;
     MsgHeader.Header.OpCode := OP_MSG;
     if NoResponse then
@@ -1143,49 +1151,65 @@ begin
     else
       MsgHeader.flagbits := [];
 
-    data := tgoByteBuffer.Create;
+    if not NoResponse then
+    begin
+      fReplyEvent.ResetEvent;
+      FRepliesLock.Enter;
+      fReplyEvents.Add(RequestID, fReplyEvent);
+      FRepliesLock.Leave;
+    end;
+
     try
-      data.AppendBuffer(MsgHeader, sizeof(MsgHeader));
+
+      data := tgoByteBuffer.Create;
+      try
+        data.AppendBuffer(MsgHeader, sizeof(MsgHeader));
     // Append section of PayloadType 0, that contains the first document.
     // Every op_msg MUST have ONE section of payload type 0.
     // this is the standard command document, like {"insert": "collection"},
     // plus write concern and other command arguments.
 
-      paramtype := 0;
-      data.Append(paramtype);
-      data.Append(ParamType0);
+        paramtype := 0;
+        data.Append(paramtype);
+        data.Append(ParamType0);
 
     // Some parameters may be dis-embedded from the first document and simply appended as sections of Payload Type 1,
     // see https://github.com/mongodb/specifications/blob/master/source/message/OP_MSG.rst#command-arguments-as-payload
 
-      for I := 0 to high(ParamsType1) do
-        ParamsType1[I].WriteTo(data);
+        for I := 0 to high(ParamsType1) do
+          ParamsType1[I].WriteTo(data);
 
     { TODO : optional Checksum }
 
     // update message length in header
-      pHeader := @data.buffer[0];
-      pHeader.Header.MessageLength := data.Size;
-      T := data.ToBytes;
+        pHeader := @data.buffer[0];
+        pHeader.Header.MessageLength := data.Size;
+        T := data.ToBytes;
 
       //Compression also implies that the ANSWER will be compressed by the server !
-      if CompressionAllowed and KnowsCompression then
-        Compress(T);
+        if CompressionAllowed and KnowsCompression then
+          Compress(T);
 
-      Send(T); //Send() no longer auto-connects
+        Send(T); //Send() no longer auto-connects
+      finally
+        FreeAndNil(data);
+      end;
+
+      if not NoResponse then
+        result := WaitForReply(RequestID,fReplyEvent)
+      else
+        result := nil;
     finally
-      FreeAndNil(data);
+      if not NoResponse then
+      begin
+        FRepliesLock.Enter;
+        fReplyEvents.Remove(RequestID);
+        FRepliesLock.Leave;
+      end;
     end;
-
-    if not NoResponse then
-      result := WaitForReply(MsgHeader.Header.RequestID)
-    else
-      result := nil;
-
   end
   else
     raise EgoMongoDBConnectionError.Create('Connection Failed');
-
 end;
 
 function TgoMongoProtocol.HaveReplyMsgHeader(out AMsgHeader): Boolean;
@@ -1234,32 +1258,39 @@ begin
   end;
 end;
 
-function TgoMongoProtocol.WaitForReply(const ARequestId: Integer): IgoMongoReply;
+function TgoMongoProtocol.WaitForReply(const ARequestId: Integer; const aReplyEvent: tEvent): IgoMongoReply;
 var
   Start, LastRecv: tStopWatch;
-  ms: Int64;
+  MsLeft: Int64;
 begin
   { TODO : Handle per-request timeout as in findoptions.maxTimeMS }
   result := nil;
   Start := ThisMoment;
-  while Connected and (not TryGetReply(ARequestId, result)) do
+  MsLeft := Max(int64(FSettings.ReplyTimeout) - Start.ElapsedMilliseconds, 500);
+
+  while Connected do
   begin
-    if LastPartialReply(ARequestId, LastRecv) then // have partial reply ?
-      ms := LastRecv.ElapsedMilliseconds // number of milliseconds "radiosilence" in large response
-    else // no partial reply either
-      ms := Start.ElapsedMilliseconds;
+    aReplyEvent.WaitFor(MsLeft);
+    if TryGetReply(ARequestId, Result) then
+      Break; //Success! Result=Reply
 
-    if ms > FSettings.ReplyTimeout then
-      Break;
+      //Timeout
 
-    Sleep(5);
+    if MsLeft <= 0 then
+    begin
+        // if no partial reply received, give up. Else give partial reply a chance to grow.
+      if not LastPartialReply(ARequestId, LastRecv) then
+        Break // give up (result=NIL)
+      else
+      begin
+        MsLeft := int64(FSettings.ReplyTimeout) - LastRecv.ElapsedMilliseconds;
+        if MsLeft <= 0 then  //radio-silence too long?
+          Break; //give up (result=NIL)
+      end;
+    end;
   end;
 
-  if (result = nil) then
-    TryGetReply(ARequestId, result);
-
   RemoveReply(ARequestId);
-
   if (result = nil) then
     Recover; // There could be trash in the input buffer, blocking the system
 end;
@@ -1289,6 +1320,7 @@ var
   MongoReply: IgoMongoReply;
   ProcessedBytes, BytesLeft: Integer;
   MsgHeader: TMsgHeader;
+  Waiter: TEvent;
 begin
   FRecvBufferLock.Enter;
   try
@@ -1309,12 +1341,16 @@ begin
           begin
             FRepliesLock.Acquire;
             try
+              Waiter := nil;
               { Remove the partial reply timestamp }
               FPartialReplies.Remove(MongoReply.ResponseTo);
               { Add the completed reply to the dictionary }
               FCompletedReplies.Add(MongoReply.ResponseTo, MongoReply);
+              fReplyEvents.TryGetValue(MongoReply.ResponseTo, Waiter);
             finally
               FRepliesLock.Release;
+              if assigned(Waiter) then
+                Waiter.SetEvent;
             end;
 
             { remove the processed bytes from the buffer }
