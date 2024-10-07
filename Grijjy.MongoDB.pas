@@ -244,8 +244,6 @@ type
     { Query build-level feature settings
       https://www.mongodb.com/docs/manual/reference/command/features/ }
     function Features: TgoBsonDocument;
-    { Query to find out MaxWireVersion }
-    function Hello: TgoBsonDocument;
     { Drops the database with the specified name.
       Parameters:
       AName: The name of the database to drop. }
@@ -711,7 +709,7 @@ type
     ConnectionTimeout: Integer;
 
     { Timeout waiting for partial or complete reply events, in milliseconds.
-      Defaults to 5000 (5 seconds) }
+      Defaults to 30000 (30 seconds) }
       ReplyTimeout: Integer;
 
     { Default query flags }
@@ -742,10 +740,8 @@ type
       Password: string;
 
     ApplicationName: string;
-
     UseSnappyCompression: Boolean;
     UseZlibCompression: Boolean;
-
     GlobalReadPreference: tgoMongoReadPreference;
   public
     { Creates a settings record with the default settings }
@@ -787,7 +783,6 @@ type
     function BuildInfo: TgoBsonDocument;
     function HostInfo: TgoBsonDocument;
     function Features: TgoBsonDocument;
-    function Hello: TgoBsonDocument;
     procedure ReleaseToPool;
   protected
 
@@ -854,7 +849,6 @@ type
   public
     constructor Create(const AHost: string; APort: Integer; const ASettings: tgoMongoClientSettings; aMaxitems: integer);
     destructor Destroy; override;
-
     function GetAvailableClient: igoMongoClient; //grabs an available client connection from the pool.
     procedure ReleaseToPool(const Client: igoMongoClient);//Releases the connection back to the pool
     procedure ClearAll;
@@ -871,12 +865,9 @@ type
       inline;
     class function CreateCursor(const ADoc: TgoBsonDocument; AProtocol: TgoMongoProtocol; AReadPreference: tgoMongoReadPreference):
       igoMongoCursor;
-
     class function ToDocArray(const aCursor: igoMongoCursor): TArray<TgoBsonDocument>;
-
     class function ToBsonArray(const DocArray: TArray<TgoBsonDocument>): tgoBsonArray; overload;
     class function ToBsonArray(const aCursor: igoMongoCursor): tgoBsonArray; overload;
-
     class function FirstDoc(const Docs: tArray<tgoBsonDocument>): tgoBsonDocument;
   end;
 
@@ -1097,7 +1088,7 @@ type
     FName: string;
     FReadPreference: tgoMongoReadPreference;
   private
-    procedure AddWriteConcern(const AWriter: IgoBsonWriter);
+    procedure AddWriteConcern(const AWriter: IgoBsonWriter {TODO: Parameterlist});
     procedure SpecifyDB(const AWriter: IgoBsonWriter);
     procedure SpecifyReadPreference(const AWriter: IgoBsonWriter);
 
@@ -1370,8 +1361,7 @@ begin
       SpecifyDB(Writer);
       SpecifyReadPreference(Writer);
       Writer.WriteEndDocument;
-        { "true" tells protocol to NOT expect a result - saves one roundtrip }
-      Reply := FProtocol.OpMsg(True, Writer.ToBson, nil, True);
+      Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, fprotocol.ReplyTimeout);
     except
         // always ignore exceptions in a destructor!
     end;
@@ -1417,7 +1407,7 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, fprotocol.ReplyTimeout);
   HandleTimeout(Reply);
   FIndex := 0;
   SetLength(FPage, 0);
@@ -1450,7 +1440,7 @@ class function TgoMongoClientSettings.Create: TgoMongoClientSettings;
 begin
   Fillchar(Result, sizeof(Result), 0);
   Result.ConnectionTimeout := 5000;
-  Result.ReplyTimeout := 5000;
+  Result.ReplyTimeout := 30000;
   Result.QueryFlags := [];
   Result.Secure := false;
   Result.Certificate := nil;
@@ -1473,29 +1463,28 @@ end;
 
 constructor TgoMongoClient.Create(const AHost: string; const APort: Integer; const ASettings: TgoMongoClientSettings);
 var
-  S: TgoMongoProtocolSettings;
+  ProtocolSettings: TgoMongoProtocolSettings;
 begin
   inherited Create;
-  S.GlobalReadPreference := ASettings.GlobalReadPreference;
-  if S.GlobalReadPreference = tgoMongoReadPreference.fromParent then
-    S.GlobalReadPreference := tgoMongoReadPreference.Primary;
-  S.ConnectionTimeout := ASettings.ConnectionTimeout;
-  S.ReplyTimeout := ASettings.ReplyTimeout;
-  S.QueryFlags := ASettings.QueryFlags;
-  S.Secure := ASettings.Secure;
-  S.Certificate := ASettings.Certificate;
-  S.PrivateKey := ASettings.PrivateKey;
-  S.PrivateKeyPassword := ASettings.PrivateKeyPassword;
-  S.AuthMechanism := ASettings.AuthMechanism;
-  S.AuthDatabase := ASettings.AuthDatabase;
-  S.Username := ASettings.Username;
-  S.Password := ASettings.Password;
-  S.ApplicationName := ASettings.ApplicationName;
 
-  S.UseSnappyCompression := ASettings.UseSnappyCompression;
-  S.UseZlibCompression := ASettings.UseZlibCompression;
-
-  FProtocol := TgoMongoProtocol.Create(AHost, APort, S);
+  ProtocolSettings.GlobalReadPreference := ASettings.GlobalReadPreference;
+  if ProtocolSettings.GlobalReadPreference = tgoMongoReadPreference.fromParent then
+    ProtocolSettings.GlobalReadPreference := tgoMongoReadPreference.Primary;
+  ProtocolSettings.ConnectionTimeout := ASettings.ConnectionTimeout;
+  ProtocolSettings.ReplyTimeout := ASettings.ReplyTimeout;
+  ProtocolSettings.QueryFlags := ASettings.QueryFlags;
+  ProtocolSettings.Secure := ASettings.Secure;
+  ProtocolSettings.Certificate := ASettings.Certificate;
+  ProtocolSettings.PrivateKey := ASettings.PrivateKey;
+  ProtocolSettings.PrivateKeyPassword := ASettings.PrivateKeyPassword;
+  ProtocolSettings.AuthMechanism := ASettings.AuthMechanism;
+  ProtocolSettings.AuthDatabase := ASettings.AuthDatabase;
+  ProtocolSettings.Username := ASettings.Username;
+  ProtocolSettings.Password := ASettings.Password;
+  ProtocolSettings.ApplicationName := ASettings.ApplicationName;
+  ProtocolSettings.UseSnappyCompression := ASettings.UseSnappyCompression;
+  ProtocolSettings.UseZlibCompression := ASettings.UseZlibCompression;
+  FProtocol := TgoMongoProtocol.Create(AHost, APort, ProtocolSettings);
 end;
 
 constructor TgoMongoClient.Create(const ASettings: TgoMongoClientSettings);
@@ -1522,7 +1511,7 @@ begin
   Writer.WriteString('$db', AName);
  { TODO : Readpreference??? }
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(Writer.ToBson, nil);
+  Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   HandleCommandReply(Reply);
 end;
 
@@ -1559,7 +1548,7 @@ begin
   Writer.WriteString('$db', DB_ADMIN);
   { TODO : Readpreference??? }
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   HandleCommandReply(Reply);
   Doc := Reply.FirstDoc;
   if not Doc.IsNil then
@@ -1594,7 +1583,7 @@ begin
       Writer.WriteString('Comment', AComment);
   end;
   Writer.WriteEndDocument;
-  Reply := FProtocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   HandleCommandReply(Reply);
 
   Doc := Reply.FirstDoc;
@@ -1659,7 +1648,7 @@ begin
   CommandToIssue(Writer); // let the anonymous method write the commands
   Writer.WriteString('$db', DB_ADMIN);
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   HandleCommandReply(Reply);
   with tgoCursorHelper do
     Result := CreateCursor(Reply.FirstDoc, FProtocol, FProtocol.GlobalReadPreference);
@@ -1706,6 +1695,7 @@ begin
   Result := fPooled;
 end;
 
+(* Removed. tgomongoprotocol ues hello for configuration
 function TgoMongoClient.Hello: TgoBsonDocument;
 var
   Doc: TgoBsonDocument;
@@ -1718,6 +1708,9 @@ begin
     end) do
     Result := Doc;
 end;
+ *)
+
+
 
 function TgoMongoClient.HostInfo: TgoBsonDocument;
 var
@@ -1807,7 +1800,7 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   HandleCommandReply(Reply);
   with tgoCursorHelper do
     Result := CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference);
@@ -1825,7 +1818,7 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   HandleCommandReply(Reply, TgoMongoErrorCode.NamespaceNotFound);
 end;
 
@@ -1848,7 +1841,7 @@ begin
   SpecifyReadPreference(Writer);
   Writer.WriteInt32('scale', AScale);
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   HandleCommandReply(Reply);
   Doc := Reply.FirstDoc;
   if Doc.IsNil then
@@ -1916,7 +1909,7 @@ begin
   Writer.WriteBoolean('backwards', ACollation.Backwards);
   Writer.WriteEndDocument;
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := (HandleCommandReply(Reply) = 0);
 end;
 
@@ -1951,7 +1944,7 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   HandleCommandReply(Reply);
   with tgoCursorHelper do
     Result := ToDocArray(CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference));
@@ -1971,7 +1964,7 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := (HandleCommandReply(Reply) = 0);
 end;
 
@@ -2018,9 +2011,40 @@ begin
   DoSpecifyReadPreference(GetReadPreference, AWriter);
 end;
 
-procedure TgoMongoCollection.AddWriteConcern(const AWriter: IgoBsonWriter);
+
+
+
+(*AddWriteConcern (not implemented yet)
+
+ when performing operations that perform writes in the database, you
+ can specify
+
+ - IF you want a reply for confirmation (the default is true).
+   Omitting the confirmation would save latency time if you perform
+   many individual writes.
+
+ - Optionally, a timeout for the confirmation. (Default is infinity)
+   If the server is unable to confirm the operation within this
+   client-specified timeout, the server will send a writeConcernError
+   error message back to the client.
+
+
+   If you specify a long timeout X for a lengthy write/update operation,
+   the OPMSG call should wait long enough, e.g. (X + 5000 ms)
+   and not give up sooner.
+*)
+
+procedure TgoMongoCollection.AddWriteConcern(const AWriter: IgoBsonWriter {TODO: Parameterlist});
 begin
-    { Write concerns are currently not supported }
+    (* TODO : Implement Writeconcern, something like
+
+     var doc:tgoBsonDocument;
+     doc:=tgobsondocument.create;
+     doc['w']:=1;                                //Default
+     doc['wtimeout']:= protocol.replytimeout;    //Optional
+     aWriter.WriteName('writeConcern');
+     aWriter.WriteRawBsonDocument(doc.ToBson);
+     *)
 end;
 
 function TgoMongoCollection.Count: Integer;
@@ -2041,7 +2065,7 @@ begin
   Writer.WriteName('query');
   Writer.WriteRawBsonDocument(AFilter.ToBson);
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := HandleCommandReply(Reply);
 end;
 
@@ -2079,9 +2103,9 @@ begin
   Writer.WriteBoolean('unique', AUnique);
   Writer.WriteEndDocument;
   Writer.WriteEndArray;
-  AddWriteConcern(Writer);
+  AddWriteConcern(Writer {TODO: Parameterlist} );
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := (HandleCommandReply(Reply) = 0);
 end;
 
@@ -2113,9 +2137,9 @@ begin
     Writer.WriteString('language_override', ALanguageOverwriteField);
   Writer.WriteEndDocument;
   Writer.WriteEndArray;
-  AddWriteConcern(Writer);
+  AddWriteConcern(Writer {TODO: Parameterlist});
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := (HandleCommandReply(Reply) = 0);
 end;
 
@@ -2131,9 +2155,9 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteString('index', AName);
-  AddWriteConcern(Writer);
+  AddWriteConcern(Writer {TODO: Parameterlist});
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := (HandleCommandReply(Reply) = 0);
 end;
 
@@ -2177,7 +2201,7 @@ begin
   SpecifyDB(Writer);
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   HandleCommandReply(Reply);
   with tgoCursorHelper do
     Result := ToDocArray(CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference));
@@ -2201,9 +2225,9 @@ begin
   Writer.WriteInt32('limit', ALimit);
   Writer.WriteEndDocument;
   Writer.WriteEndArray;
-  AddWriteConcern(Writer);
+  AddWriteConcern(Writer {TODO: Parameterlist});
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := HandleCommandReply(Reply);
 end;
 
@@ -2262,7 +2286,7 @@ begin
   SpecifyReadPreference(Writer);
   AOptions.WriteOptions(Writer);
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   HandleCommandReply(Reply);
   with tgoCursorHelper do
     Result := CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference);
@@ -2362,7 +2386,7 @@ begin
    *)
 
     Writer.WriteBoolean('ordered', AOrdered);
-    AddWriteConcern(Writer);
+    AddWriteConcern(Writer {TODO: Parameterlist});
     Writer.WriteEndDocument;
     Payload0 := Writer.ToBson;
     BytesEncoded := Length(Payload0) + 100; // overly generous estimation
@@ -2391,7 +2415,7 @@ begin
       dec(Remaining);
     end; // FOR
 
-    Reply := Protocol.OpMsg(True, Payload0, Payload1);
+    Reply := Protocol.OpMsg(Payload0, Payload1, False, protocol.ReplyTimeout);
     Inc(Result, HandleCommandReply(Reply));
   end; // While
   Assert(Index = ACount);
@@ -2416,9 +2440,9 @@ begin
   Writer.WriteStartArray('documents');
   Writer.WriteValue(ADocument);
   Writer.WriteEndArray;
-  AddWriteConcern(Writer);
+  AddWriteConcern(Writer {TODO: Parameterlist});
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := (HandleCommandReply(Reply) = 1);
 end;
 
@@ -2445,9 +2469,9 @@ begin
   Writer.WriteEndDocument;
   Writer.WriteEndArray;
   Writer.WriteBoolean('ordered', AOrdered);
-  AddWriteConcern(Writer);
+  AddWriteConcern(Writer {TODO: Parameterlist});
   Writer.WriteEndDocument;
-  Reply := Protocol.OpMsg(True, Writer.ToBson, nil);
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := HandleCommandReply(Reply);
 end;
 
@@ -3049,12 +3073,11 @@ end;
 
 {Get an available client connection from the connection pool and make it unavailable}
 
-
 function tgoConnectionPool.GetAvailableClient: igoMongoClient;
 var
   item: igoMongoClient;
 begin
-  result := NIL;
+  result := nil;
   repeat
     flock.Acquire;
       //Find the first available connection
@@ -3123,7 +3146,7 @@ begin
         item.Pooled := False; //indicate that item is no longer in a pool
         ItemsToKill := ItemsToKill + [item]; //Move item from pool to array
         flist.delete(i);
-        item := NIL;
+        item := nil;
       end;
     end;
   finally
@@ -3152,7 +3175,7 @@ begin
       item.Pooled := False; //indicate that item is no longer in a pool
       ItemsToKill := ItemsToKill + [item]; //Move item from pool to array
       flist.delete(i);
-      item := NIL;
+      item := nil;
     end;
   finally
     flock.Release;

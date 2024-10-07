@@ -194,12 +194,12 @@ type
     FMaxWireVersion: Integer;
     FMaxWriteBatchSize: Integer;
     FMaxMessageSizeBytes: Integer;
-    fknowsZlib, fknowsSnappy: Boolean;
+    fServerknowsZlib, fServerknowsSnappy: Boolean;
     fHandShakeRecursion: Integer; //prevent recursive handshaking
   private
     procedure Send(const adata: tBytes);
     procedure Recover;
-    function WaitForReply(const ARequestId: Integer; const aReplyEvent:tEvent): IgoMongoReply;
+    function WaitForReply(const ARequestId: Integer; const aReplyEvent: tEvent; aTimeoutMS: Integer = 0): IgoMongoReply;
     function TryGetReply(const ARequestId: Integer; out AReply: IgoMongoReply): Boolean; inline;
     function LastPartialReply(const ARequestId: Integer; out ALastRecv: tStopWatch): Boolean;
 
@@ -227,8 +227,9 @@ type
     procedure RemoveReply(const ARequestId: Integer);
     procedure UpdateReplyTimeout(const ARequestId: Integer);
     procedure Compress(var Packet: tBytes);
+    procedure ProtocolDefaults;
   public
-    function KnowsCompression: Boolean;
+    function CanUseCompression: Boolean;
     function ThisMoment: tStopWatch;
     class constructor Create;
     class destructor Destroy;
@@ -242,12 +243,8 @@ type
       ASettings: custom protocol settings. }
     constructor Create(const AHost: string; const APort: Integer; const ASettings: TgoMongoProtocolSettings);
     destructor Destroy; override;
-
-    function OpMsg(const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>; NoResponse: Boolean = False): IgoMongoReply;
-      overload;
-
-    function OpMsg(CompressionAllowed: Boolean; const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>; NoResponse: Boolean =
-      False): IgoMongoReply; overload;
+    function OpMsg(const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>; NoResponse: Boolean; aTimeoutMS: Integer):
+      IgoMongoReply;
 
   public
     { Authenticate error message if failed }
@@ -261,6 +258,7 @@ type
     property MaxMessageSizeBytes: Integer read FMaxMessageSizeBytes write FMaxMessageSizeBytes;
     property GlobalReadPreference: tgoMongoReadPreference read FSettings.GlobalReadPreference write FSettings.GlobalReadPreference;
     property Connected: Boolean read GetConnected write SetConnected;
+    property ReplyTimeout: integer read fSettings.ReplyTimeout write fSettings.ReplyTimeout;
   end;
 
 resourcestring
@@ -426,6 +424,7 @@ begin
   fReplyEvents := TDictionary<Integer, TEvent>.Create;
   fReplyEvent := TEvent.Create(nil, True, False, ''); //Currently, only support request-response model
   SetLength(FRecvBuffer, RECV_BUFFER_SIZE);
+  ProtocolDefaults;
   //No longer do connect() in the constructor
 end;
 
@@ -498,7 +497,7 @@ begin
   Writer.WriteBinaryData(TgoBsonBinaryData.Create(TEncoding.Utf8.GetBytes(APayload)));
   Writer.WriteInt32('autoAuthorize', 1);
   Writer.WriteEndDocument;
-  result := OpMsg(False, Writer.ToBson, nil)
+  result := OpMsg(Writer.ToBson, nil, False, max(Replytimeout, 5000))
 end;
 
 function TgoMongoProtocol.saslContinue(const AConversationId: Integer; const APayload: string): IgoMongoReply;
@@ -513,7 +512,7 @@ begin
   Writer.WriteName('payload');
   Writer.WriteBinaryData(TgoBsonBinaryData.Create(TEncoding.Utf8.GetBytes(APayload)));
   Writer.WriteEndDocument;
-  result := OpMsg(False, Writer.ToBson, nil)
+  result := OpMsg(Writer.ToBson, nil, False, max(Replytimeout, 5000))
 end;
 
 function TgoMongoProtocol.Authenticate: Boolean;
@@ -650,7 +649,7 @@ begin
 
   if (OldConnection <> nil) then
   begin
-    if (FClientSocketManager <> nil) and WasConnected then //release open connection to pool
+    if (FClientSocketManager <> nil) and WasConnected then //release open socket connection to pool for quick re-use
       FClientSocketManager.Release(OldConnection) //This also stops all callbacks
     else
     begin
@@ -708,10 +707,13 @@ begin
   if (OldConnection <> nil) then
     FClientSocketManager.Release(OldConnection);
 
-  { Shutting down }
+  { Shutting down ? }
   if not Assigned(FConnection) then
     Exit(False);
 
+  {Disable compression etc completely before connect/authenticate/hello}
+
+  ProtocolDefaults;
 
   {Was the new connection obtained from the pool already connected?}
   result := Connected;
@@ -754,11 +756,12 @@ begin
       raise EgoMongoDBConnectionError.Create(Format(RS_MONGODB_AUTHENTICATION_ERROR, [FAuthErrorCode, FAuthErrorMessage]));
   end;
 
-  Hello();
+  Hello(); //call hello only when connected!
 end;
 
 
-//The "Hello" tells the server what our capabilities are and queries its capabilities.
+{The "Hello" tells the server what our capabilities are and queries the server's capabilities.
+ This is where we determine if the server supports compression etc.}
 procedure TgoMongoProtocol.Hello;
 var
   Writer: IgoBsonWriter;
@@ -772,15 +775,8 @@ begin
   inc(fhandshakeRecursion);  //recursion protection
   if fHandshakeRecursion = 1 then
   begin
-    FMaxWireVersion := 1;
-    FMinWireVersion := 1;
-    FMaxWriteBatchSize := DEF_MAX_BULK_SIZE;
-    FMaxMessageSizeBytes := DEF_MAX_MSG_SIZE;
-    fknowsZlib := False;
-    fknowsSnappy := False;
+    ProtocolDefaults; //disable compression etc
     try
-    // https://github.com/mongodb/specifications/blob/master/source/mongodb-handshake/handshake.rst
-    { isMaster is the deprecated LEGACY version of the hello command. }
       Writer := TgoBsonWriter.Create;
 
     // ***************** main doc {
@@ -841,7 +837,7 @@ begin
         Writer.WriteEndDocument; // main doc}
       end;
 
-      Reply := OpMsg(False, Writer.ToBson, nil);    //Do not compress.  OpMSG() autoconnects if necessary
+      Reply := OpMsg(Writer.ToBson, nil, False, max(Replytimeout, 5000));
 
       if Assigned(Reply) then
       begin
@@ -868,9 +864,9 @@ begin
               if value.IsString then
               begin
                 if value.AsString = 'snappy' then
-                  fknowsSnappy := True;
+                  fServerknowsSnappy := True;
                 if value.AsString = 'zlib' then
-                  fknowsZlib := True;
+                  fServerknowsZlib := True;
               end;
             end;
           end;
@@ -1059,9 +1055,10 @@ begin
     SizeRead := sizeof(Byte) + PayloadSize; // Should be identical with offs
 end;
 
-function tgoMongoProtocol.KnowsCompression: Boolean;
+function tgoMongoProtocol.CanUseCompression: Boolean;
 begin
-  result := fKnowsSnappy or fKnowsZlib;
+  result := (FSettings.UseSnappyCompression and Snappy_Implemented and fServerKnowsSnappy) or //
+    (FSettings.UseZlibCompression and Zlib_Implemented and fServerKnowsZlib);
 end;
 
 procedure TgoMongoProtocol.Compress(var Packet: tBytes);
@@ -1071,11 +1068,11 @@ var
   DataSize, compressedsize: Integer;
   Output: tBytes;
 begin
-  if KnowsCompression then
+  if length(Packet) > 0 then
   begin
     h := @Packet[0];
     DataSize := h.DataSize;
-    if fknowsSnappy then
+    if fServerknowsSnappy then
     begin
       if tSnappycompressor.Compress(h.DataStart, DataSize, compressedsize, Output) then
       begin
@@ -1089,7 +1086,7 @@ begin
         move(Output[0], q.DataStart^, length(Output));
       end;
     end
-    else if fknowsZlib then
+    else if fServerknowsZlib then
     begin
       if tZlibCompressor.Compress(h.DataStart, DataSize, compressedsize, Output) then
       begin
@@ -1103,6 +1100,7 @@ begin
         move(Output[0], q.DataStart^, length(Output));
       end;
     end;
+    //Else do nothing.
   end;
 end;
 
@@ -1121,13 +1119,24 @@ begin
   result := tStopWatch.StartNew;
 end;
 
-function TgoMongoProtocol.OpMsg(const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>; NoResponse: Boolean): IgoMongoReply;
-begin
-  result := OpMsg(False, ParamType0, ParamsType1, NoResponse);
-end;
 
-function TgoMongoProtocol.OpMsg(CompressionAllowed: Boolean; const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>;
-  NoResponse: Boolean = False): IgoMongoReply;
+
+(* OpMsg remarks:
+
+ Normally NoResponse = false:  We DO expect a response after a request and we wait max. aTimeoutMS seconds for it.
+
+ The exceptions are the following, but they haven't been implemented yet :
+
+ - OP_MSG with moretocome flag set (the message is part of a stream of messages)
+ - Fire-and-forget operations, such as unacknowledged writes  -->  writeconcern: {w: 0}
+
+
+ Note: if you set noResponse to true and the server returns a response anyway, the response
+ lands in fCompletedReplies and stays there indefinitely...
+*)
+
+function TgoMongoProtocol.OpMsg(const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>; NoResponse: Boolean; aTimeoutMS:
+  Integer): IgoMongoReply;
 var
   MsgHeader: TOPMSGHeader;
   pHeader: POpMsgHeader;
@@ -1135,14 +1144,14 @@ var
   I, RequestID: Integer;
   T: tBytes;
   paramtype: Byte;
-  AutoReConnected: Boolean;
+  ExpectResponse: Boolean;
 begin
   if length(ParamType0) = 0 then
     raise EgoMongoDBError.Create('Mandatory document of PayloadType 0 missing in OpMsg');
-
+  ExpectResponse := not NoResponse;
   if EnsureConnected() then {=Auto-reconnect if needed!}
   begin
-    RequestID := AtomicIncrement(FNextRequestId);
+    RequestID := AtomicIncrement(FNextRequestId); //rolls over after 2 billion
     MsgHeader.Header.RequestID := RequestID;
     MsgHeader.Header.ResponseTo := 0;
     MsgHeader.Header.OpCode := OP_MSG;
@@ -1151,11 +1160,12 @@ begin
     else
       MsgHeader.flagbits := [];
 
-    if not NoResponse then
+    if ExpectResponse then
     begin
       fReplyEvent.ResetEvent;
       FRepliesLock.Enter;
-      fReplyEvents.Add(RequestID, fReplyEvent);
+      fReplyEvents.Add(RequestID, fReplyEvent); //register the event for this ID
+      FCompletedReplies.Remove(RequestID);  // ... just in case some old response with this ID was still lingering (should not happen)
       FRepliesLock.Leave;
     end;
 
@@ -1187,7 +1197,8 @@ begin
         T := data.ToBytes;
 
       //Compression also implies that the ANSWER will be compressed by the server !
-        if CompressionAllowed and KnowsCompression then
+
+        if CanUseCompression then
           Compress(T);
 
         Send(T); //Send() no longer auto-connects
@@ -1195,12 +1206,12 @@ begin
         FreeAndNil(data);
       end;
 
-      if not NoResponse then
-        result := WaitForReply(RequestID,fReplyEvent)
+      if ExpectResponse then
+        result := WaitForReply(RequestID, fReplyEvent, aTimeoutMS)
       else
         result := nil;
     finally
-      if not NoResponse then
+      if ExpectResponse then
       begin
         FRepliesLock.Enter;
         fReplyEvents.Remove(RequestID);
@@ -1225,6 +1236,16 @@ begin
     move(tb[0], AMsgHeader, sizeof(TMsgHeader));
     result := TMsgHeader(AMsgHeader).ValidOpcode;
   end;
+end;
+
+procedure TgoMongoProtocol.ProtocolDefaults;
+begin
+  FMaxWireVersion := 1;
+  FMinWireVersion := 1;
+  FMaxWriteBatchSize := DEF_MAX_BULK_SIZE;
+  FMaxMessageSizeBytes := DEF_MAX_MSG_SIZE;
+  fServerknowsZlib := False;
+  fServerknowsSnappy := False;
 end;
 
 procedure TgoMongoProtocol.Send(const adata: tBytes);//Send() is ONLY called from OP_MSG
@@ -1258,34 +1279,40 @@ begin
   end;
 end;
 
-function TgoMongoProtocol.WaitForReply(const ARequestId: Integer; const aReplyEvent: tEvent): IgoMongoReply;
+function TgoMongoProtocol.WaitForReply(const ARequestId: Integer; const aReplyEvent: tEvent; aTimeoutMS: Integer = 0): IgoMongoReply;
 var
-  Start, LastRecv: tStopWatch;
-  MsLeft: Int64;
+  LastRecv: tStopWatch;
+  TimeLeft: Int64;
 begin
-  { TODO : Handle per-request timeout as in findoptions.maxTimeMS }
   result := nil;
-  Start := ThisMoment;
-  MsLeft := Max(int64(FSettings.ReplyTimeout) - Start.ElapsedMilliseconds, 500);
-
+  if (aTimeoutMS <= 0) then
+    aTimeoutMS := Max(FSettings.ReplyTimeout, 500);
+  TimeLeft := aTimeoutMS;
   while Connected do
   begin
-    aReplyEvent.WaitFor(MsLeft);
+    aReplyEvent.WaitFor(TimeLeft);
+
     if TryGetReply(ARequestId, Result) then
-      Break; //Success! Result=Reply
+      Break //Normal situation, Success! Result=Reply
+    else
+      TimeLeft := 0; //Timeout
 
-      //Timeout
+    // check if a partial reply was received or updated.
+    // If yes, update TimeLeft.
 
-    if MsLeft <= 0 then
+    if (TimeLeft <= 0) then
     begin
-        // if no partial reply received, give up. Else give partial reply a chance to grow.
+      // if no partial reply received, give up.
       if not LastPartialReply(ARequestId, LastRecv) then
         Break // give up (result=NIL)
       else
       begin
-        MsLeft := int64(FSettings.ReplyTimeout) - LastRecv.ElapsedMilliseconds;
-        if MsLeft <= 0 then  //radio-silence too long?
-          Break; //give up (result=NIL)
+        //partial reply found. How long ago was it updated?
+        TimeLeft := int64(aTimeoutMS) - LastRecv.ElapsedMilliseconds;
+        if TimeLeft <= 0 then  //radio-silence too long?
+          Break //give up (result=NIL)
+        else
+          TimeLeft := Max(TimeLeft, 10);  //just in case bandwidth is very low and data trickles in
       end;
     end;
   end;
@@ -1344,8 +1371,9 @@ begin
               Waiter := nil;
               { Remove the partial reply timestamp }
               FPartialReplies.Remove(MongoReply.ResponseTo);
-              { Add the completed reply to the dictionary }
-              FCompletedReplies.Add(MongoReply.ResponseTo, MongoReply);
+              { Add the completed reply to the dictionary.
+                Use "addorsetvalue" just in case old data was never retrieved. }
+              FCompletedReplies.AddOrSetValue(MongoReply.ResponseTo, MongoReply);
               fReplyEvents.TryGetValue(MongoReply.ResponseTo, Waiter);
             finally
               FRepliesLock.Release;
