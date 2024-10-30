@@ -16,7 +16,7 @@ uses
 {$ELSE}
 {$MESSAGE Error 'The MongoDB driver is only supported on Windows and Linux'}
 {$ENDIF}
-  Grijjy.MongoDB.Errors,
+
   Grijjy.MongoDB.Compressors, Grijjy.Bson;
 
 const
@@ -31,6 +31,12 @@ Const
   CompressorID_Highest=CompressorID_Zlib;
 
 type
+
+  { Base class for MongoDB errors }
+  EgoMongoDBError = class(Exception);
+
+  { Is raised when a connection error (or timeout) occurs. }
+  EgoMongoDBConnectionError = class(EgoMongoDBError);
 
   tgoMongoReadPreference = (primary = 0, primaryPreferred, secondary, secondaryPreferred, nearest, fromParent = 31);
 
@@ -229,7 +235,9 @@ type
     procedure Compress(var Packet: tBytes);
     procedure ProtocolDefaults;
     function EnsureCapacity(CapacityNeeded: Integer): Boolean; inline;
+
   public
+    class function IsInternalError(const errorcode: integer): Boolean; Static;
     function CanUseCompression: Boolean;
     function ThisMoment: tStopWatch;
     class constructor Create;
@@ -1368,6 +1376,14 @@ begin
   end;
 end;
 
+
+class Function tgoMongoProtocol.IsInternalError(Const errorcode:integer):Boolean;
+begin
+   if (errorcode=146) or (errorcode=147) or (errorcode=301)
+   then result:=True
+   else result:=false;
+end;
+
 procedure TgoMongoProtocol.SocketRecv(const ABuffer: Pointer; const ASize: Integer);
 { remove the processed bytes from the buffer }
 
@@ -1412,15 +1428,12 @@ procedure TgoMongoProtocol.SocketRecv(const ABuffer: Pointer; const ASize: Integ
     end;
   end;
 
-
-
-  procedure ReportError (aErrorcode:integer; aErrorText, aErrorMnemonic:String);
+  procedure ReportError (aErrorcode:integer; aResponseTo:Integer;  aErrorText, aErrorMnemonic:String);
     var MsgHeader: TMsgHeader;
   begin
        // Is there at least a partial reply in the input buffer, so we know the ID of the
        // request that this was a response to ?
-       if HaveReplyMsgHeader(MsgHeader) then
-         QueueReply(TgoMongoMsgReply.CreateFromError(msgheader.ResponseTo, aErrorCode, aErrorText, aErrorMnemonic));
+       QueueReply(TgoMongoMsgReply.CreateFromError(aResponseTo, aErrorCode, aErrorText, aErrorMnemonic));
        ClearBuffer; //totally discard input buffer
   end;
 
@@ -1428,11 +1441,14 @@ var
   MongoReply: IgoMongoReply;
   ProcessedBytes: Integer;
   MsgHeader: TMsgHeader;
-
+  Validation:tgoReplyValidationResult;
+  HaveHeader:boolean;
 begin
   try
     FRecvBufferLock.Enter;
     try
+      HaveHeader:=HaveReplyMsgHeader(MsgHeader);
+
       if EnsureCapacity(FRecvSize + ASize) then
       begin
         { buffer the new data }
@@ -1441,61 +1457,71 @@ begin
       end
       else
       begin
-        { TODO : Put an "out of memory" reply in the reply dictionary so op_msg can react
-         accordingly. Now all it gets is a timeout. }
-        ReportError(Integer(tgoMongoErrorCode.ExceededMemoryLimit), 'Cannot Realloc Receive Buffer', 'ExceededMemoryLimit');
-        Exit;
+        { If at least the header is complete, post an "out of memory" reply so op_msg can react accordingly. }
+        if HaveHeader then
+           ReportError(146, MsgHeader.ResponseTo,'Buffer exceeded Memory Limit', 'ExceededMemoryLimit');
+        ClearBuffer;
+        Exit; // --> finally
       end;
 
       { Is there one or more valid replies pending? }
-      while True do
-      begin
-        case TgoMongoMsgReply.ValidateMessage(FRecvBuffer, FRecvSize, ProcessedBytes, MongoReply) of
+      Repeat
+        Validation:=TgoMongoMsgReply.ValidateMessage(FRecvBuffer, FRecvSize, ProcessedBytes, MongoReply) ;
+        HaveHeader:=HaveReplyMsgHeader(MsgHeader);
+
+        case Validation of
 
           tgoReplyValidationResult.rvrOK:
             begin
               RemoveBytes(ProcessedBytes);
               QueueReply(MongoReply);
+              //Continue just in case the server sent multiple replies
             end;
+
+          tgoReplyValidationResult.rvrNoHeader:  //Not enough bytes in buffer to do anything.
+            Break;  // --> finally
 
           tgoReplyValidationResult.rvrGrowing:
             begin
               // header opcode is valid but message still growing/incomplete
               // Update the partial reply timestamp
-              if HaveReplyMsgHeader(MsgHeader) then
+              if HaveHeader then
                 UpdateReplyTimeout(MsgHeader.ResponseTo);
-              Break;
+              Break; // --> finally
             end;
 
           tgoReplyValidationResult.rvrOpcodeInvalid:
             begin
-              // whatever is at the start of the buffer is not a valid header, discard everything
-              // The opmsg() will probably timeout.
+              // TRASH in buffer: whatever is at the start of the buffer is not a valid header
+              // We can't post an error message. Opmsg() will timeout.
               ClearBuffer;
-              Break;
+              Break; // --> finally
             end;
 
           tgoReplyValidationResult.rvrCompressorError, tgoReplyValidationResult.rvrCompressorNotSupported:
             begin
-              ReportError(Integer(tgoMongoErrorCode.ZLibError), 'Compressor: Expansion error or compressor not supported', 'ZLibError');
-              Break;
+              if HaveHeader then
+                 ReportError(147, MsgHeader.ResponseTo, 'Compressor: Expansion error or compressor not supported', 'ZLibError');
+              ClearBuffer;
+              Break;   // --> finally
             end;
 
           tgoReplyValidationResult.rvrDataError, tgoReplyValidationResult.rvrChecksumInvalid:
             begin
-              ReportError(Integer(tgoMongoErrorCode.DocumentValidationFailure), 'Document Validation Failure', 'DocumentValidationFailure');
-              Break;
+              if HaveHeader then
+                ReportError(301, MsgHeader.ResponseTo, 'Data Corruption Detected', 'DataCorruptionDetected');
+              ClearBuffer;
+              Break;  // --> finally
             end;
-
         else
           Break;
         end; // case
-      end;
+      until false;
     finally
       FRecvBufferLock.Leave;
     end;
   except
-    //No exceptions should escape here - it is a socket event handler
+    //No exceptions should escape - it is a socket event handler that runs in a background thread
   end;
 end;
 
@@ -1570,16 +1596,15 @@ begin
 
   if aCode <> 0 then
   begin
-    fFirstDoc['ok'] := 0;
+    fFirstDoc['ok'] := 0;   //false
     fFirstDoc['code'] := aCode;
+    if aErrMsg <> '' then
+      fFirstDoc['errmsg'] := aErrMsg;
+    if aCodeName <> '' then
+      fFirstDoc['codeName'] := aCodeName;
   end
   else
     fFirstDoc['ok'] := 1;
-
-  if aErrMsg <> '' then
-    fFirstDoc['errmsg'] := aErrMsg;
-  if aCodeName <> '' then
-    fFirstDoc['codeName'] := aCodeName;
 
   self.FPayload0:=self.FPayload0+[fFirstDoc.ToBson];
 end;
