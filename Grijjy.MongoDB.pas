@@ -126,62 +126,99 @@ const
   );
 
 type
-  { MongoDB error codes }
-  TgoMongoErrorCode = (OK = 0, InternalError = 1, BadValue = 2, OBSOLETE_DuplicateKey = 3, NoSuchKey = 4, GraphContainsCycle = 5,
-    HostUnreachable = 6, HostNotFound = 7, UnknownError = 8, FailedToParse = 9, CannotMutateObject = 10, UserNotFound = 11,
-    UnsupportedFormat = 12, Unauthorized = 13, TypeMismatch = 14, Overflow = 15, InvalidLength = 16, ProtocolError = 17,
-    AuthenticationFailed = 18, CannotReuseObject = 19, IllegalOperation = 20, EmptyArrayOperation = 21, InvalidBSON = 22, AlreadyInitialized
-    = 23, LockTimeout = 24, RemoteValidationError = 25, NamespaceNotFound = 26, IndexNotFound = 27, PathNotViable = 28, NonExistentPath = 29,
-    InvalidPath = 30, RoleNotFound = 31, RolesNotRelated = 32, PrivilegeNotFound = 33, CannotBackfillArray = 34, UserModificationFailed = 35,
-    RemoteChangeDetected = 36, FileRenameFailed = 37, FileNotOpen = 38, FileStreamFailed = 39, ConflictingUpdateOperators = 40,
-    FileAlreadyOpen = 41, LogWriteFailed = 42, CursorNotFound = 43, UserDataInconsistent = 45, LockBusy = 46, NoMatchingDocument = 47,
-    NamespaceExists = 48, InvalidRoleModification = 49, ExceededTimeLimit = 50, ManualInterventionRequired = 51, DollarPrefixedFieldName =
-    52, InvalidIdField = 53, NotSingleValueField = 54, InvalidDBRef = 55, EmptyFieldName = 56, DottedFieldName = 57, RoleModificationFailed
-    = 58, CommandNotFound = 59, OBSOLETE_DatabaseNotFound = 60, ShardKeyNotFound = 61, OplogOperationUnsupported = 62, StaleShardVersion =
-    63, WriteConcernFailed = 64, MultipleErrorsOccurred = 65, ImmutableField = 66, CannotCreateIndex = 67, IndexAlreadyExists = 68,
-    AuthSchemaIncompatible = 69, ShardNotFound = 70, ReplicaSetNotFound = 71, InvalidOptions = 72, InvalidNamespace = 73, NodeNotFound = 74,
-    WriteConcernLegacyOK = 75, NoReplicationEnabled = 76, OperationIncomplete = 77, CommandResultSchemaViolation = 78,
-    UnknownReplWriteConcern = 79, RoleDataInconsistent = 80, NoMatchParseContext = 81, NoProgressMade = 82, RemoteResultsUnavailable = 83,
-    DuplicateKeyValue = 84, IndexOptionsConflict = 85, IndexKeySpecsConflict = 86, CannotSplit = 87, SplitFailed_OBSOLETE = 88,
-    NetworkTimeout = 89, CallbackCanceled = 90, ShutdownInProgress = 91, SecondaryAheadOfPrimary = 92, InvalidReplicaSetConfig = 93,
-    NotYetInitialized = 94, NotSecondary = 95, OperationFailed = 96, NoProjectionFound = 97, DBPathInUse = 98, CannotSatisfyWriteConcern =
-    100, OutdatedClient = 101, IncompatibleAuditMetadata = 102, NewReplicaSetConfigurationIncompatible = 103, NodeNotElectable = 104,
-    IncompatibleShardingMetadata = 105, DistributedClockSkewed = 106, LockFailed = 107, InconsistentReplicaSetNames = 108,
-    ConfigurationInProgress = 109, CannotInitializeNodeWithData = 110, NotExactValueField = 111, WriteConflict = 112, InitialSyncFailure =
-    113, InitialSyncOplogSourceMissing = 114, CommandNotSupported = 115, DocTooLargeForCapped = 116, ConflictingOperationInProgress = 117,
-    NamespaceNotSharded = 118, InvalidSyncSource = 119, OplogStartMissing = 120, DocumentValidationFailure = 121,
-    OBSOLETE_ReadAfterOptimeTimeout = 122, NotAReplicaSet = 123, IncompatibleElectionProtocol = 124, CommandFailed = 125,
-    RPCProtocolNegotiationFailed = 126, UnrecoverableRollbackError = 127, LockNotFound = 128, LockStateChangeFailed = 129, SymbolNotFound =
-    130, RLPInitializationFailed = 131, OBSOLETE_ConfigServersInconsistent = 132, FailedToSatisfyReadPreference = 133,
+  { MongoDB error codes (as of v 8.0) }
+  TgoMongoErrorCode = (OK = 0, InternalError = 1, BadValue = 2, OBSOLETE_DuplicateKey = 3, NoSuchKey = 4,
+    GraphContainsCycle = 5, HostUnreachable = 6, HostNotFound = 7, UnknownError = 8, FailedToParse = 9,
+    CannotMutateObject = 10, UserNotFound = 11, UnsupportedFormat = 12, Unauthorized = 13, TypeMismatch = 14,
+    Overflow = 15, InvalidLength = 16, ProtocolError = 17, AuthenticationFailed = 18, CannotReuseObject = 19,
+    IllegalOperation = 20, EmptyArrayOperation = 21, InvalidBSON = 22, AlreadyInitialized = 23, LockTimeout = 24,
+    RemoteValidationError = 25, NamespaceNotFound = 26, IndexNotFound = 27, PathNotViable = 28, NonExistentPath = 29,
+    InvalidPath = 30, RoleNotFound = 31, RolesNotRelated = 32, PrivilegeNotFound = 33, CannotBackfillArray = 34,
+    UserModificationFailed = 35, RemoteChangeDetected = 36, FileRenameFailed = 37, FileNotOpen = 38, FileStreamFailed = 39,
+    ConflictingUpdateOperators = 40, FileAlreadyOpen = 41, LogWriteFailed = 42, CursorNotFound = 43, UserDataInconsistent = 45,
+    LockBusy = 46, NoMatchingDocument = 47, NamespaceExists = 48, InvalidRoleModification = 49, MaxTimeMSExpired = 50,
+    ManualInterventionRequired = 51, DollarPrefixedFieldName = 52, InvalidIdField = 53, NotSingleValueField = 54, InvalidDBRef = 55,
+    EmptyFieldName = 56, DottedFieldName = 57, RoleModificationFailed = 58, CommandNotFound = 59, ShardKeyNotFound = 61,
+    OplogOperationUnsupported = 62, StaleShardVersion = 63, WriteConcernFailed = 64, MultipleErrorsOccurred = 65, ImmutableField = 66,
+    CannotCreateIndex = 67, IndexAlreadyExists = 68, AuthSchemaIncompatible = 69, ShardNotFound = 70, ReplicaSetNotFound = 71,
+    InvalidOptions = 72, InvalidNamespace = 73, NodeNotFound = 74, WriteConcernLegacyOK = 75, NoReplicationEnabled = 76,
+    OperationIncomplete = 77, CommandResultSchemaViolation = 78, UnknownReplWriteConcern = 79, RoleDataInconsistent = 80,
+    NoMatchParseContext = 81, NoProgressMade = 82, RemoteResultsUnavailable = 83, IndexOptionsConflict = 85,
+    IndexKeySpecsConflict = 86, CannotSplit = 87, NetworkTimeout = 89, CallbackCanceled = 90, ShutdownInProgress = 91,
+    SecondaryAheadOfPrimary = 92, InvalidReplicaSetConfig = 93, NotYetInitialized = 94, NotSecondary = 95, OperationFailed = 96,
+    NoProjectionFound = 97, DBPathInUse = 98, UnsatisfiableWriteConcern = 100, OutdatedClient = 101, IncompatibleAuditMetadata = 102,
+    NewReplicaSetConfigurationIncompatible = 103, NodeNotElectable = 104, IncompatibleShardingMetadata = 105, DistributedClockSkewed = 106,
+    LockFailed = 107, InconsistentReplicaSetNames = 108, ConfigurationInProgress = 109, CannotInitializeNodeWithData = 110,
+    NotExactValueField = 111, WriteConflict = 112, InitialSyncFailure = 113, InitialSyncOplogSourceMissing = 114,
+    CommandNotSupported = 115, DocTooLargeForCapped = 116, ConflictingOperationInProgress = 117, NamespaceNotSharded = 118,
+    InvalidSyncSource = 119, OplogStartMissing = 120, DocumentValidationFailure = 121, NotAReplicaSet = 123,
+    IncompatibleElectionProtocol = 124, CommandFailed = 125, RPCProtocolNegotiationFailed = 126, UnrecoverableRollbackError = 127,
+    LockNotFound = 128, LockStateChangeFailed = 129, SymbolNotFound = 130, FailedToSatisfyReadPreference = 133,
     ReadConcernMajorityNotAvailableYet = 134, StaleTerm = 135, CappedPositionLost = 136, IncompatibleShardingConfigVersion = 137,
-    RemoteOplogStale = 138, JSInterpreterFailure = 139, InvalidSSLConfiguration = 140, SSLHandshakeFailed = 141, JSUncatchableError = 142,
-    CursorInUse = 143, IncompatibleCatalogManager = 144, PooledConnectionsDropped = 145, ExceededMemoryLimit = 146, ZLibError = 147,
-    ReadConcernMajorityNotEnabled = 148, NoConfigMaster = 149, StaleEpoch = 150, OperationCannotBeBatched = 151, OplogOutOfOrder = 152,
-    ChunkTooBig = 153, InconsistentShardIdentity = 154, CannotApplyOplogWhilePrimary = 155, NeedsDocumentMove = 156, CanRepairToDowngrade =
-    157, MustUpgrade = 158, DurationOverflow = 159, MaxStalenessOutOfRange = 160, IncompatibleCollationVersion = 161, CollectionIsEmpty =
-    162, ZoneStillInUse = 163, InitialSyncActive = 164, ViewDepthLimitExceeded = 165, CommandNotSupportedOnView = 166,
-    OptionNotSupportedOnView = 167, InvalidPipelineOperator = 168, CommandOnShardedViewNotSupportedOnMongod = 169, TooManyMatchingDocuments
-    = 170, CannotIndexParallelArrays = 171, TransportSessionClosed = 172, TransportSessionNotFound = 173, TransportSessionUnknown = 174,
-    QueryPlanKilled = 175, FileOpenFailed = 176, ZoneNotFound = 177, RangeOverlapConflict = 178, WindowsPdhError = 179, BadPerfCounterPath =
-    180, AmbiguousIndexKeyPattern = 181, InvalidViewDefinition = 182, ClientMetadataMissingField = 183, ClientMetadataAppNameTooLarge = 184,
-    ClientMetadataDocumentTooLarge = 185, ClientMetadataCannotBeMutated = 186, LinearizableReadConcernError = 187, IncompatibleServerVersion
-    = 188, PrimarySteppedDown = 189, MasterSlaveConnectionFailure = 190, OBSOLETE_BalancerLostDistributedLock = 191, FailPointEnabled = 192,
-    NoShardingEnabled = 193, BalancerInterrupted = 194, ViewPipelineMaxSizeExceeded = 195, InvalidIndexSpecificationOption = 197,
-    OBSOLETE_ReceivedOpReplyMessage = 198, ReplicaSetMonitorRemoved = 199, ChunkRangeCleanupPending = 200, CannotBuildIndexKeys = 201,
-    NetworkInterfaceExceededTimeLimit = 202, ShardingStateNotInitialized = 203, TimeProofMismatch = 204, ClusterTimeFailsRateLimiter = 205,
-    NoSuchSession = 206, InvalidUUID = 207, TooManyLocks = 208, StaleClusterTime = 209, CannotVerifyAndSignLogicalTime = 210, KeyNotFound =
-    211, IncompatibleRollbackAlgorithm = 212, DuplicateSession = 213, AuthenticationRestrictionUnmet = 214, DatabaseDropPending = 215,
-    ElectionInProgress = 216, IncompleteTransactionHistory = 217, UpdateOperationFailed = 218, FTDCPathNotSet = 219, FTDCPathAlreadySet =
-    220, IndexModified = 221, CloseChangeStream = 222, IllegalOpMsgFlag = 223, JSONSchemaNotAllowed = 224, TransactionTooOld = 225,
-    SocketException = 9001, OBSOLETE_RecvStaleConfig = 9996, NotMaster = 10107, CannotGrowDocumentInCappedNamespace = 10003, DuplicateKey =
-    11000, InterruptedAtShutdown = 11600, Interrupted = 11601, InterruptedDueToReplStateChange = 11602, OutOfDiskSpace = 14031, KeyTooLong =
-    17280, BackgroundOperationInProgressForDatabase = 12586, BackgroundOperationInProgressForNamespace = 12587, NotMasterOrSecondary = 13436,
-    NotMasterNoSlaveOk = 13435, ShardKeyTooBig = 13334, StaleConfig = 13388, DatabaseDifferCase = 13297, OBSOLETE_PrepareConfigsFailed =
-    13104);
+    RemoteOplogStale = 138, JSInterpreterFailure = 139, InvalidSSLConfiguration = 140, SSLHandshakeFailed = 141,
+    JSUncatchableError = 142, CursorInUse = 143, IncompatibleCatalogManager = 144, PooledConnectionsDropped = 145,
+    ExceededMemoryLimit = 146, ZLibError = 147, ReadConcernMajorityNotEnabled = 148, NoConfigPrimary = 149,
+    StaleEpoch = 150, OperationCannotBeBatched = 151, OplogOutOfOrder = 152, ChunkTooBig = 153, InconsistentShardIdentity = 154,
+    CannotApplyOplogWhilePrimary = 155, CanRepairToDowngrade = 157, MustUpgrade = 158, DurationOverflow = 159,
+    MaxStalenessOutOfRange = 160, IncompatibleCollationVersion = 161, CollectionIsEmpty = 162, ZoneStillInUse = 163,
+    InitialSyncActive = 164, ViewDepthLimitExceeded = 165, CommandNotSupportedOnView = 166, OptionNotSupportedOnView = 167,
+    InvalidPipelineOperator = 168, CommandOnShardedViewNotSupportedOnMongod = 169, TooManyMatchingDocuments = 170,
+    CannotIndexParallelArrays = 171, TransportSessionClosed = 172, TransportSessionNotFound = 173, TransportSessionUnknown = 174,
+    QueryPlanKilled = 175, FileOpenFailed = 176, ZoneNotFound = 177, RangeOverlapConflict = 178, WindowsPdhError = 179,
+    BadPerfCounterPath = 180, AmbiguousIndexKeyPattern = 181, InvalidViewDefinition = 182, ClientMetadataMissingField = 183,
+    ClientMetadataAppNameTooLarge = 184, ClientMetadataDocumentTooLarge = 185, ClientMetadataCannotBeMutated = 186,
+    LinearizableReadConcernError = 187, IncompatibleServerVersion = 188, PrimarySteppedDown = 189,
+    MasterSlaveConnectionFailure = 190, FailPointEnabled = 192, NoShardingEnabled = 193, BalancerInterrupted = 194,
+    ViewPipelineMaxSizeExceeded = 195, InvalidIndexSpecificationOption = 197, ReplicaSetMonitorRemoved = 199,
+    ChunkRangeCleanupPending = 200, CannotBuildIndexKeys = 201, NetworkInterfaceExceededTimeLimit = 202,
+    ShardingStateNotInitialized = 203, TimeProofMismatch = 204, ClusterTimeFailsRateLimiter = 205, NoSuchSession = 206,
+    InvalidUUID = 207, TooManyLocks = 208, StaleClusterTime = 209, CannotVerifyAndSignLogicalTime = 210,
+    KeyNotFound = 211, IncompatibleRollbackAlgorithm = 212, DuplicateSession = 213, AuthenticationRestrictionUnmet = 214,
+    DatabaseDropPending = 215, ElectionInProgress = 216, IncompleteTransactionHistory = 217, UpdateOperationFailed = 218,
+    FTDCPathNotSet = 219, FTDCPathAlreadySet = 220, IndexModified = 221, CloseChangeStream = 222,
+    IllegalOpMsgFlag = 223, QueryFeatureNotAllowed = 224, TransactionTooOld = 225, AtomicityFailure = 226,
+    CannotImplicitlyCreateCollection = 227, SessionTransferIncomplete = 228, MustDowngrade = 229, DNSHostNotFound = 230,
+    DNSProtocolError = 231, MaxSubPipelineDepthExceeded = 232, TooManyDocumentSequences = 233, RetryChangeStream = 234,
+    InternalErrorNotSupported = 235, ForTestingErrorExtraInfo = 236, CursorKilled = 237, NotImplemented = 238,
+    SnapshotTooOld = 239, DNSRecordTypeMismatch = 240, ConversionFailure = 241, CannotCreateCollection = 242,
+    IncompatibleWithUpgradedServer = 243, BrokenPromise = 245, SnapshotUnavailable = 246, ProducerConsumerQueueBatchTooLarge = 247,
+    ProducerConsumerQueueEndClosed = 248, StaleDbVersion = 249, StaleChunkHistory = 250, NoSuchTransaction = 251,
+    ReentrancyNotAllowed = 252, FreeMonHttpInFlight = 253, FreeMonHttpTemporaryFailure = 254, FreeMonHttpPermanentFailure = 255,
+    TransactionCommitted = 256, TransactionTooLarge = 257, UnknownFeatureCompatibilityVersion = 258, KeyedExecutorRetry = 259,
+    InvalidResumeToken = 260, TooManyLogicalSessions = 261, ExceededTimeLimit = 262, OperationNotSupportedInTransaction = 263,
+    TooManyFilesOpen = 264, OrphanedRangeCleanUpFailed = 265, FailPointSetFailed = 266, PreparedTransactionInProgress = 267,
+    CannotBackup = 268, DataModifiedByRepair = 269, RepairedReplicaSetNode = 270, JSInterpreterFailureWithStack = 271,
+    MigrationConflict = 272, ProducerConsumerQueueProducerQueueDepthExceeded = 273, ProducerConsumerQueueConsumed = 274,
+    ExchangePassthrough = 275, IndexBuildAborted = 276, AlarmAlreadyFulfilled = 277, UnsatisfiableCommitQuorum = 278,
+    ClientDisconnect = 279, ChangeStreamFatalError = 280, TransactionCoordinatorSteppingDown = 281,
+    TransactionCoordinatorReachedAbortDecision = 282, WouldChangeOwningShard = 283, ForTestingErrorExtraInfoWithExtraInfoInNamespace = 284,
+    IndexBuildAlreadyInProgress = 285, ChangeStreamHistoryLost = 286, TransactionCoordinatorDeadlineTaskCanceled = 287,
+    ChecksumMismatch = 288, WaitForMajorityServiceEarlierOpTimeAvailable = 289, TransactionExceededLifetimeLimitSeconds = 290,
+    NoQueryExecutionPlans = 291, QueryExceededMemoryLimitNoDiskUseAllowed = 292, InvalidSeedList = 293, InvalidTopologyType = 294,
+    InvalidHeartBeatFrequency = 295, TopologySetNameRequired = 296, HierarchicalAcquisitionLevelViolation = 297, InvalidServerType = 298,
+    OCSPCertificateStatusRevoked = 299, RangeDeletionAbandonedBecauseCollectionWithUUIDDoesNotExist = 300, DataCorruptionDetected = 301,
+    OCSPCertificateStatusUnknown = 302, SplitHorizonChange = 303, ShardInvalidatedForTargeting = 304,
+    RangeDeletionAbandonedBecauseTaskDocumentDoesNotExist = 307, CurrentConfigNotCommittedYet = 308, ExhaustCommandFinished = 309,
+    PeriodicJobIsStopped = 310, TransactionCoordinatorCanceled = 311, OperationIsKilledAndDelisted = 312,
+    ResumableRangeDeleterDisabled = 313, ObjectIsBusy = 314, TooStaleToSyncFromSource = 315, QueryTrialRunCompleted = 316,
+    ConnectionPoolExpired = 317, ForTestingOptionalErrorExtraInfo = 318, MovePrimaryInProgress = 319, TenantMigrationConflict = 320,
+    TenantMigrationCommitted = 321, APIVersionError = 322, APIStrictError = 323, APIDeprecationError = 324,
+    TenantMigrationAborted = 325, OplogQueryMinTsMissing = 326, NoSuchTenantMigration = 327,
+    TenantMigrationAccessBlockerShuttingDown = 328, TenantMigrationInProgress = 329, SkipCommandExecution = 330,
+    FailedToRunWithReplyBuilder = 331, CannotDowngrade = 332, ServiceExecutorInShutdown = 333, MechanismUnavailable = 334,
+    TenantMigrationForgotten = 335, SocketException = 9001, OBSOLETE_RecvStaleConfig = 9996,
+    CannotGrowDocumentInCappedNamespace = 10003, NotWritablePrimary = 10107, BSONObjectTooLarge = 10334, DuplicateKey = 11000,
+    InterruptedAtShutdown = 11600, Interrupted = 11601, InterruptedDueToReplStateChange = 11602,
+    BackgroundOperationInProgressForDatabase = 12586, BackgroundOperationInProgressForNamespace = 12587,
+    OBSOLETE_PrepareConfigsFailed = 13104, MergeStageNoMatchingDocument = 13113, DatabaseDifferCase = 13297,
+    StaleConfig = 13388, NotPrimaryNoSecondaryOk = 13435, NotPrimaryOrSecondary = 13436, OutOfDiskSpace = 14031,
+    ClientMarkedKilled = 46841);
+
 
 type
+
   { Is raised when there is an error writing to the database }
-  EgoMongoDBWriteError = class(EgoMongoDBError)
+  EgoMongoDBGeneralError = class(EgoMongoDBError)
 {$REGION 'Internal Declarations'}
   private
     FErrorCode: TgoMongoErrorCode;
@@ -191,6 +228,12 @@ type
     { The MongoDB error code }
     property ErrorCode: TgoMongoErrorCode read FErrorCode;
   end;
+
+  EgoMongoDBProtocolError=Class(EgoMongoDBGeneralError);
+  EGoMongoDBWriteError = class(EgoMongoDBGeneralError);
+  EGoMongoDBWriteConcernError = class(EgoMongoDBWriteError);
+
+
 
 type
   { Forward declarations }
@@ -905,58 +948,72 @@ var
   Values: TgoBsonArray;
   OK: Boolean;
   ErrorCode: TgoMongoErrorCode;
-  ErrorMsg: string;
+  ErrorMsg, codeName: string;
+
+     Procedure GetErrorCodes (const aDoc:tgoBsonDocument);
+      begin
+        Word(ErrorCode) := aDoc['code'];
+        ErrorMsg := aDoc['errmsg'];
+        codename := aDoc['codeName'];
+        if codename<>'' then
+           codename:=' ['+codename+']';
+      end ;
+
 begin
   HandleTimeout(AReply); { Exception if timeout }
 
   Doc := AReply.FirstDoc;
   if Doc.IsNil then
-    { Everything OK }
-    Exit(0);
+    Exit(0); { No document - just assume that everything OK }
 
-  { Return number of documents affected }
-  Result := Doc['n'];
+  Result := Doc['n']; { Return number of documents affected. If "n" is missing, result is 0}
 
-  OK := Doc['ok'];
-  if (not OK) then
+  OK := Doc['ok']; {"ok" should normally be present, except in some extreme aggregation pipeline
+                    corner cases in MongoDB versions < 4.2}
+
+  if (not OK) then  {is ok missing or 0?}
   begin
-    { Check for top-level error }
-    Word(ErrorCode) := Doc['code'];
-
-    { Check for expected error }
-    if (AErrorToIgnore <> TgoMongoErrorCode.OK) and (ErrorCode = AErrorToIgnore) then
-      Exit;
-
+    { First check for top-level error }
+    GetErrorCodes(Doc);
     if (ErrorCode <> TgoMongoErrorCode.OK) then
     begin
-      ErrorMsg := Doc['errmsg'];
-      raise EgoMongoDBWriteError.Create(ErrorCode, ErrorMsg);
+      if (ErrorCode = AErrorToIgnore) then
+        Exit { ignore an "expected" error code}
+      else
+      begin
+        if tgoMongoProtocol.IsInternalError(ord(Errorcode)) then
+        raise EgoMongoDBProtocolError.Create(ErrorCode, ErrorMsg + codename)
+
+        else raise EgoMongoDBGeneralError.Create(ErrorCode, ErrorMsg + codename);
+      end;
     end;
 
     { If there is no top-level error, then check for Write Error(s).
       Raise exception for first write error found. }
+
     if (Doc.TryGetValue('writeErrors', Value)) then
     begin
       Values := Value.AsBsonArray;
       if (Values.Count > 0) then
       begin
         ErrorDoc := Values.Items[0].asBsonDocument;
-        Word(ErrorCode) := ErrorDoc['code'];
-        ErrorMsg := ErrorDoc['errmsg'];
-        raise EgoMongoDBWriteError.Create(ErrorCode, ErrorMsg);
+        GetErrorCodes(ErrorDoc);
+        raise EgoMongoDBWriteError.Create(ErrorCode, ErrorMsg+codename);
       end;
     end;
 
     { If there are no write errors either, then check for write concern error. }
+
     if (Doc.TryGetValue('writeConcernError', Value)) then
     begin
       ErrorDoc := Value.asBsonDocument;
-      Word(ErrorCode) := ErrorDoc['code'];
-      ErrorMsg := ErrorDoc['errmsg'];
-      raise EgoMongoDBWriteError.Create(ErrorCode, ErrorMsg);
+      GetErrorCodes(ErrorDoc);
+      raise EgoMongoDBWriteConcernError.Create(ErrorCode, ErrorMsg);
     end;
 
-    { Could not detect any errors in reply. Raise generic error. }
+    { Could not detect any errors in reply.
+      Raise generic error because "ok" is either missing or 0. }
+
     raise EgoMongoDBError.Create(RS_MONGODB_GENERIC_ERROR);
   end;
 end;
@@ -1149,9 +1206,9 @@ type
   end;
 
 //
-{$REGION 'EgoMongoDBWriteError'}
+{$REGION 'EgoMongoDBGeneralError'}
 
-constructor EgoMongoDBWriteError.Create(const AErrorCode: TgoMongoErrorCode; const AErrorMsg: string);
+constructor EgoMongoDBGeneralError.Create(const AErrorCode: TgoMongoErrorCode; const AErrorMsg: string);
 begin
   inherited Create(AErrorMsg + Format(' (error %d)', [Ord(AErrorCode)]));
   FErrorCode := AErrorCode;
@@ -1408,7 +1465,9 @@ begin
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
   Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, fprotocol.ReplyTimeout);
-  HandleTimeout(Reply);
+//  HandleTimeout(Reply);
+  HandleCommandReply(Reply);   //TEST
+
   FIndex := 0;
   SetLength(FPage, 0);
   ADoc := Reply.FirstDoc;

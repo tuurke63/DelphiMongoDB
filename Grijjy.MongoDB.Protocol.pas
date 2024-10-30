@@ -16,6 +16,7 @@ uses
 {$ELSE}
 {$MESSAGE Error 'The MongoDB driver is only supported on Windows and Linux'}
 {$ENDIF}
+
   Grijjy.MongoDB.Compressors, Grijjy.Bson;
 
 const
@@ -23,6 +24,11 @@ const
   COLLECTION_COMMAND = '$cmd';
   { System collections }
   DB_ADMIN = 'admin';
+
+Const
+  CompressorID_Snappy=1;
+  CompressorID_Zlib=2;
+  CompressorID_Highest=CompressorID_Zlib;
 
 type
 
@@ -168,7 +174,7 @@ type
 
   private
     const
-      RECV_BUFFER_SIZE = 32768;
+      RECV_BUFFER_SIZE = 128*1024; //larger initial buffer to avoid excessive reallocation
       EMPTY_DOCUMENT: array[0..4] of Byte = (5, 0, 0, 0, 0);
   private
     class var
@@ -228,7 +234,10 @@ type
     procedure UpdateReplyTimeout(const ARequestId: Integer);
     procedure Compress(var Packet: tBytes);
     procedure ProtocolDefaults;
+    function EnsureCapacity(CapacityNeeded: Integer): Boolean; inline;
+
   public
+    class function IsInternalError(const errorcode: integer): Boolean; Static;
     function CanUseCompression: Boolean;
     function ThisMoment: tStopWatch;
     class constructor Create;
@@ -351,7 +360,7 @@ type
     FHeader: TOPMSGHeader;
     FPayload0: TArray<tBytes>;
     FPayload1: TArray<tgoPayloadType1>;
-    fFirstDoc: TgoBsonDocument;
+    FFirstDoc: TgoBsonDocument;
   protected
     { IgoMongoReply }
     function _GetResponseTo: Integer;
@@ -367,6 +376,9 @@ type
 
     procedure ReadData(const ABuffer: Pointer; const ASize: Integer);
     constructor Create(const ABuffer: Pointer; const ASize: Integer);
+    constructor CreateFromError(aReplyTo: Int64; aCode: Integer; aErrMsg,
+        aCodeName: String);
+
   end;
 
   { tgoPayloadType1 }
@@ -531,7 +543,7 @@ begin
 
   { Initialize our Scram helper }
   case FSettings.AuthMechanism of
-    TgoMongoAuthMechanism.SCRAM_SHA_1:
+    TgoMongoAuthMechanism.SCRAM_SHA_1 :
       Scram := TgoScram.Create(TgoScramMechanism.SCRAM_SHA_1, FSettings.Username, FSettings.Password);
   else
     Scram := TgoScram.Create(TgoScramMechanism.SCRAM_SHA_256, FSettings.Username, FSettings.Password);
@@ -1082,7 +1094,7 @@ begin
         q.Header.OpCode := OP_COMPRESSED;
         q.Header.MessageLength := length(Packet);
         q.UncompressedSize := DataSize;
-        q.CompressorID := 1; // snappy;
+        q.CompressorID := CompressorID_Snappy;
         move(Output[0], q.DataStart^, length(Output));
       end;
     end
@@ -1096,7 +1108,7 @@ begin
         q.Header.OpCode := OP_COMPRESSED;
         q.Header.MessageLength := length(Packet);
         q.UncompressedSize := DataSize;
-        q.CompressorID := 2; // zlib;
+        q.CompressorID := CompressorID_Zlib;
         move(Output[0], q.DataStart^, length(Output));
       end;
     end;
@@ -1342,93 +1354,174 @@ begin
   end;
 end;
 
+function TgoMongoProtocol.EnsureCapacity(CapacityNeeded: Integer): Boolean;
+var
+  Size: Integer;
+begin
+  result := True;
+  Size := length(FRecvBuffer);
+  if Size < CapacityNeeded then
+  begin
+    try
+      while Size < CapacityNeeded do
+        Size := Size + RECV_BUFFER_SIZE; //chunks of 128 K, avoid excessive realloc
+      SetLength(FRecvBuffer, Size);
+    except
+      // Out Of Memory, cannot do reallocmem
+      result := False;
+      SetLength(FRecvBuffer, 0);
+      SetLength(FRecvBuffer, RECV_BUFFER_SIZE);
+      FRecvSize := 0;
+    end;
+  end;
+end;
+
+
+class Function tgoMongoProtocol.IsInternalError(Const errorcode:integer):Boolean;
+begin
+   if (errorcode=146) or (errorcode=147) or (errorcode=301)
+   then result:=True
+   else result:=false;
+end;
+
 procedure TgoMongoProtocol.SocketRecv(const ABuffer: Pointer; const ASize: Integer);
+{ remove the processed bytes from the buffer }
+
+  procedure ClearBuffer;
+  begin
+    FRecvSize := 0;
+  end;
+
+  procedure RemoveBytes(numbytes: Integer);
+  var
+    BytesLeft: Integer;
+  begin
+    if (numbytes >= FRecvSize) then
+      ClearBuffer
+    else
+    begin
+      BytesLeft := FRecvSize - numbytes;
+      if BytesLeft > 0 then // should always be true
+      begin
+        move(FRecvBuffer[numbytes], FRecvBuffer[0], BytesLeft);
+        FRecvSize := BytesLeft;
+      end
+      else
+        ClearBuffer;
+    end;
+  end;
+
+  procedure QueueReply(AReply: IgoMongoReply);
+  var
+    Waiter: TEvent;
+  begin
+    FRepliesLock.Acquire;
+    try
+      Waiter := nil;
+      FPartialReplies.Remove(AReply.ResponseTo); //no longer needed
+      FCompletedReplies.AddOrSetValue(AReply.ResponseTo, AReply); //Add the completed reply to the dictionary.
+      fReplyEvents.TryGetValue(AReply.ResponseTo, Waiter);
+    finally
+      FRepliesLock.Release;
+      if Assigned(Waiter) then  //if a tevent is waiting for this reply, fire it!
+        Waiter.SetEvent;
+    end;
+  end;
+
+  procedure ReportError (aErrorcode:integer; aResponseTo:Integer;  aErrorText, aErrorMnemonic:String);
+    var MsgHeader: TMsgHeader;
+  begin
+       // Is there at least a partial reply in the input buffer, so we know the ID of the
+       // request that this was a response to ?
+       QueueReply(TgoMongoMsgReply.CreateFromError(aResponseTo, aErrorCode, aErrorText, aErrorMnemonic));
+       ClearBuffer; //totally discard input buffer
+  end;
+
 var
   MongoReply: IgoMongoReply;
-  ProcessedBytes, BytesLeft: Integer;
+  ProcessedBytes: Integer;
   MsgHeader: TMsgHeader;
-  Waiter: TEvent;
+  Validation:tgoReplyValidationResult;
+  HaveHeader:boolean;
 begin
-  FRecvBufferLock.Enter;
   try
-    { Expand the buffer if we are at capacity }
-    if (FRecvSize + ASize >= length(FRecvBuffer)) then
-      SetLength(FRecvBuffer, (FRecvSize + ASize) * 2);
+    FRecvBufferLock.Enter;
+    try
+      HaveHeader:=HaveReplyMsgHeader(MsgHeader);
 
-    { Append the new buffer }
-    move(ABuffer^, FRecvBuffer[FRecvSize], ASize);
-    FRecvSize := FRecvSize + ASize;
-
-    { Is there one or more valid replies pending? }
-    while True do
-    begin
-      case TgoMongoMsgReply.ValidateMessage(FRecvBuffer, FRecvSize, ProcessedBytes, MongoReply) of
-
-        tgoReplyValidationResult.rvrOK:
-          begin
-            FRepliesLock.Acquire;
-            try
-              Waiter := nil;
-              { Remove the partial reply timestamp }
-              FPartialReplies.Remove(MongoReply.ResponseTo);
-              { Add the completed reply to the dictionary.
-                Use "addorsetvalue" just in case old data was never retrieved. }
-              FCompletedReplies.AddOrSetValue(MongoReply.ResponseTo, MongoReply);
-              fReplyEvents.TryGetValue(MongoReply.ResponseTo, Waiter);
-            finally
-              FRepliesLock.Release;
-              if assigned(Waiter) then
-                Waiter.SetEvent;
-            end;
-
-            { remove the processed bytes from the buffer }
-            if (ProcessedBytes = FRecvSize) then
-              FRecvSize := 0
-            else
-            begin
-              BytesLeft := FRecvSize - ProcessedBytes;
-              if BytesLeft > 0 then // should always be true
-              begin
-                move(FRecvBuffer[ProcessedBytes], FRecvBuffer[0], BytesLeft);
-                FRecvSize := BytesLeft;
-              end
-              else
-                FRecvSize := 0;
-            end;
-            { TODO : Faster wakeup of waiting thread ??? }
-          end;
-
-        tgoReplyValidationResult.rvrGrowing:
-          begin
-            // header opcode is valid but message still growing/incomplete
-            // Update the partial reply timestamp
-            if HaveReplyMsgHeader(MsgHeader) then
-              UpdateReplyTimeout(MsgHeader.ResponseTo);
-            Break;
-          end;
-
-        tgoReplyValidationResult.rvrOpcodeInvalid:
-          begin
-            // whatever is at the start of the buffer is not a valid header, discard everything
-            FRecvSize := 0; // discard everything
-            Break;
-          end;
-
-        tgoReplyValidationResult.rvrDataError, tgoReplyValidationResult.rvrChecksumInvalid, tgoReplyValidationResult.rvrCompressorError,
-          tgoReplyValidationResult.rvrCompressorNotSupported:
-          begin
-            // There seems to be a valid header and there are enough bytes in the buffer, but the parser or checksum failed
-            if HaveReplyMsgHeader(MsgHeader) then
-              RemoveReply(MsgHeader.ResponseTo);
-            FRecvSize := 0; // discard everything
-            Break;
-          end
+      if EnsureCapacity(FRecvSize + ASize) then
+      begin
+        { buffer the new data }
+        move(ABuffer^, FRecvBuffer[FRecvSize], ASize);
+        FRecvSize := FRecvSize + ASize;
+      end
       else
-        Break;
-      end; // case
+      begin
+        { If at least the header is complete, post an "out of memory" reply so op_msg can react accordingly. }
+        if HaveHeader then
+           ReportError(146, MsgHeader.ResponseTo,'Buffer exceeded Memory Limit', 'ExceededMemoryLimit');
+        ClearBuffer;
+        Exit; // --> finally
+      end;
+
+      { Is there one or more valid replies pending? }
+      Repeat
+        Validation:=TgoMongoMsgReply.ValidateMessage(FRecvBuffer, FRecvSize, ProcessedBytes, MongoReply) ;
+        HaveHeader:=HaveReplyMsgHeader(MsgHeader);
+
+        case Validation of
+
+          tgoReplyValidationResult.rvrOK:
+            begin
+              RemoveBytes(ProcessedBytes);
+              QueueReply(MongoReply);
+              //Continue just in case the server sent multiple replies
+            end;
+
+          tgoReplyValidationResult.rvrNoHeader:  //Not enough bytes in buffer to do anything.
+            Break;  // --> finally
+
+          tgoReplyValidationResult.rvrGrowing:
+            begin
+              // header opcode is valid but message still growing/incomplete
+              // Update the partial reply timestamp
+              if HaveHeader then
+                UpdateReplyTimeout(MsgHeader.ResponseTo);
+              Break; // --> finally
+            end;
+
+          tgoReplyValidationResult.rvrOpcodeInvalid:
+            begin
+              // TRASH in buffer: whatever is at the start of the buffer is not a valid header
+              // We can't post an error message. Opmsg() will timeout.
+              ClearBuffer;
+              Break; // --> finally
+            end;
+
+          tgoReplyValidationResult.rvrCompressorError, tgoReplyValidationResult.rvrCompressorNotSupported:
+            begin
+              if HaveHeader then
+                 ReportError(147, MsgHeader.ResponseTo, 'Compressor: Expansion error or compressor not supported', 'ZLibError');
+              ClearBuffer;
+              Break;   // --> finally
+            end;
+
+          tgoReplyValidationResult.rvrDataError, tgoReplyValidationResult.rvrChecksumInvalid:
+            begin
+              if HaveHeader then
+                ReportError(301, MsgHeader.ResponseTo, 'Data Corruption Detected', 'DataCorruptionDetected');
+              ClearBuffer;
+              Break;  // --> finally
+            end;
+        else
+          Break;
+        end; // case
+      until false;
+    finally
+      FRecvBufferLock.Leave;
     end;
-  finally
-    FRecvBufferLock.Leave;
+  except
+    //No exceptions should escape - it is a socket event handler that runs in a background thread
   end;
 end;
 
@@ -1493,6 +1586,29 @@ begin
   { VERY basic format detection, but better than nothing }
   result := (self.OpCode = OP_MSG) or (self.OpCode = OP_COMPRESSED);
 end;
+
+constructor TgoMongoMsgReply.CreateFromError(aReplyTo: Int64; aCode: Integer;  aErrMsg, aCodeName: String);
+begin
+  inherited create;
+  FHeader.Header.ResponseTo:=aReplyTo;
+  FHeader.Header.opcode:=OP_MSG;
+  fFirstDoc := TgoBsonDocument.Create;
+
+  if aCode <> 0 then
+  begin
+    fFirstDoc['ok'] := 0;   //false
+    fFirstDoc['code'] := aCode;
+    if aErrMsg <> '' then
+      fFirstDoc['errmsg'] := aErrMsg;
+    if aCodeName <> '' then
+      fFirstDoc['codeName'] := aCodeName;
+  end
+  else
+    fFirstDoc['ok'] := 1;
+
+  self.FPayload0:=self.FPayload0+[fFirstDoc.ToBson];
+end;
+
 
 { TgoMongoMsgReply }
 
@@ -1637,6 +1753,7 @@ begin
     else
       result := tgoReplyValidationResult.rvrNoHeader; // Buffer does not contain enough bytes for a header
   except
+     result := tgoReplyValidationResult.rvrDataError; //could be OutOfMemory
     // no exceptions allowed to exit
   end;
 end;
@@ -1646,8 +1763,7 @@ class function TgoMongoMsgReply.ValidateMessage(const ABuffer: tBytes; const ASi
 var
   Source: POPCompressedHeader;
   Target: PMsgHeader;
-  Unpacked: tBytes;
-  // CompressedMessageLength, Uncompressedmessagelength, CompressedDataSize, datasize: Integer;
+  UnpackedMsg, Decompressed: tBytes;
 
 begin
   AReply := nil;
@@ -1661,42 +1777,50 @@ begin
     if Source.Header.Compressed then // has a VALID op_compressed opcode
     begin
       if ASize < Source.Header.MessageLength then
-        Exit(tgoReplyValidationResult.rvrGrowing);
+        Exit(tgoReplyValidationResult.rvrGrowing);    //Message is incomplete.
 
-      if Source.CompressorID > 2 then
+      if Source.CompressorID > CompressorID_Highest then
         Exit(tgoReplyValidationResult.rvrCompressorNotSupported);
 
-      SetLength(Unpacked, Source.UnCompressedMessageSize);
+      SetLength(UnpackedMsg, Source.UnCompressedMessageSize);
 
       // Prepare the "uncompressed" header
-      Target := @Unpacked[0];
+      Target := @UnpackedMsg[0];
       Target.MessageLength := Source.UnCompressedMessageSize;
       Target.RequestID := Source.Header.RequestID;
       Target.ResponseTo := Source.Header.ResponseTo;
       Target.OpCode := OP_MSG;
 
+
       case Source.CompressorID of
 
-        0: { noop }
+        0: { noop - never executed}
           begin
-            if not tNoopCompressor.Expand(Source.DataStart, Source.CompressedDataSize, Source.UnCompressedDataSize, Target.DataStart) then
-              Exit(tgoReplyValidationResult.rvrCompressorError);
-          end;
+            if not tNoopCompressor.Expand(Source.DataStart, Source.CompressedDataSize, Source.UnCompressedDataSize, Decompressed) then
+              Exit(tgoReplyValidationResult.rvrCompressorError)
+            else
+              move(Decompressed[0], Target.DataStart^, length(Decompressed));
+          end; //case none
 
-        1: { snappy }
+        CompressorID_Snappy:
           begin
-            if not tSnappycompressor.Expand(Source.DataStart, Source.CompressedDataSize, Source.UnCompressedDataSize, Target.DataStart) then
-              Exit(tgoReplyValidationResult.rvrCompressorError);
-          end; // case
+            if not tSnappycompressor.Expand(Source.DataStart, Source.CompressedDataSize, Source.UnCompressedDataSize, Decompressed) then
+              Exit(tgoReplyValidationResult.rvrCompressorError)
+            else
+              move(Decompressed[0], Target.DataStart^, length(Decompressed));
+          end; // case snappy
 
-        2: { zlib }
+        CompressorID_Zlib:
           begin
-            if not tZlibCompressor.Expand(Source.DataStart, Source.CompressedDataSize, Source.UnCompressedDataSize, Target.DataStart) then
-              Exit(tgoReplyValidationResult.rvrCompressorError);
-          end; // case
-      end;
+            if not tZlibCompressor.Expand(Source.DataStart, Source.CompressedDataSize, Source.UnCompressedDataSize, Decompressed) then
+              Exit(tgoReplyValidationResult.rvrCompressorError)
+            else
+              move(Decompressed[0], Target.DataStart^, length(Decompressed));
+          end; // case zlib
+      end; //case
 
-      result := ValidateOPMessage(Unpacked, Source.UnCompressedMessageSize, aSizeRead, AReply);
+      result := ValidateOPMessage(UnpackedMsg, Source.UnCompressedMessageSize, aSizeRead, AReply);
+
       if result = tgoReplyValidationResult.rvrOK then
         aSizeRead := Source.Header.MessageLength; // Bytes to discard!
     end // if compressed
