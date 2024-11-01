@@ -572,7 +572,9 @@ type
       Returns:
       True if a document matching the filter has been found and it has
       been successfully updated. }
-    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false): Boolean;
+
+    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false): Boolean;Overload;
+    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert: Boolean; OUT AUpserted:Boolean): Boolean; Overload;
 
     { Updates all documents that match a filter.
 
@@ -594,7 +596,8 @@ type
       that is actually updated may be less than this in case an update did
       not result in the change of one or more documents. }
     function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false; const AOrdered:
-      Boolean = True): Integer;
+      Boolean = True): Integer; Overload;
+    function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert, AOrdered: Boolean; OUT AUpserted:Boolean): Integer;Overload;
 
     { Finds the documents matching the filter.
 
@@ -676,6 +679,9 @@ type
       The number of documents that match the filter. }
     function Count: Integer; overload;
     function Count(const AFilter: tgoMongoFilter): Integer; overload;
+
+    {Faster than count, but returns only an estimate of the number of documents}
+    function EstimatedDocumentCount :Integer;
 
     { Creates an index in the current collection.
 
@@ -1151,7 +1157,7 @@ type
 
     function InsertMany(const ADocuments: PgoBsonDocument; const ACount: Integer; const AOrdered: Boolean): Integer; overload;
     function Delete(const AFilter: tgoMongoFilter; const AOrdered: Boolean; const ALimit: Integer): Integer;
-    function Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean): Integer;
+    function Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean; OUT Upserted:Boolean): Integer;
     function GetReadPreference: tgoMongoReadPreference;
     procedure SetReadPreference(const Value: tgoMongoReadPreference);
     function GetProtocol: tgoMongoProtocol;
@@ -1168,9 +1174,18 @@ type
     function DeleteOne(const AFilter: tgoMongoFilter): Boolean;
     function DeleteMany(const AFilter: tgoMongoFilter; const AOrdered: Boolean = True): Integer;
 
-    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false): Boolean;
+
+
+    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false): Boolean; Overload;
+    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert: Boolean; OUT AUpserted:Boolean): Boolean; Overload;
+
+
     function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false; const AOrdered:
-      Boolean = True): Integer;
+      Boolean = True): Integer;Overload;
+    function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert, AOrdered: Boolean; OUT AUpserted:Boolean): Integer;Overload;
+
+
+
     function EmptyCursor: igoMongoCursor;
     function Find: igoMongoCursor; overload;
     function Find(const AProjection: TgoMongoProjection): igoMongoCursor; overload;
@@ -1190,6 +1205,7 @@ type
 
     function Count: Integer; overload;
     function Count(const AFilter: tgoMongoFilter): Integer; overload;
+    function EstimatedDocumentCount :Integer;
 
     function CreateIndex(const AName: string; const AKeyFields: array of string; const AUnique: Boolean = false): Boolean;
     function CreateTextIndex(const AName: string; const AFields: array of string; const ALanguageOverwriteField: string = ''; const
@@ -2128,6 +2144,41 @@ begin
   Result := HandleCommandReply(Reply);
 end;
 
+
+
+
+function tgoMongoCollection.estimatedDocumentCount :Integer;
+var
+  Writer: IgoBsonWriter;
+  Reply: IgoMongoReply;
+  doc:tgoBsondocument;
+begin
+  Writer := TgoBsonWriter.Create;
+  Writer.WriteStartDocument;
+  Writer.WriteString('count', FName);
+  SpecifyDB(Writer);
+
+  doc:=tgoBsondocument.create;
+  Writer.WriteName('query');
+  Writer.WriteRawBsonDocument(doc.ToBson);  //empty query document
+
+  Writer.WriteInt32('limit', 0);
+  Writer.WriteInt32('skip', 0);
+
+  doc['level']:='local';
+  Writer.WriteName('readConcern');
+  Writer.WriteRawBsonDocument(doc.ToBson);
+
+  Writer.WriteEndDocument;
+
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
+  Result := HandleCommandReply(Reply);
+end;
+
+
+
+
+
 constructor TgoMongoCollection.Create(const ADatabase: TgoMongoDatabase; const AName: string);
 begin
   Assert(assigned(ADatabase));
@@ -2505,13 +2556,14 @@ begin
   Result := (HandleCommandReply(Reply) = 1);
 end;
 
-function TgoMongoCollection.Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean):
+function TgoMongoCollection.Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean;  OUT Upserted:Boolean):
   Integer;
   // https://docs.mongodb.com/manual/reference/command/update
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
 begin
+  Upserted:=false;
   Writer := TgoBsonWriter.Create;
   Writer.WriteStartDocument;
   Writer.WriteString('update', FName);
@@ -2532,17 +2584,37 @@ begin
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := HandleCommandReply(Reply);
+
+  if aUpsert then
+  begin
+    if not Reply.FirstDoc.isNil then
+      Upserted:= reply.FirstDoc.Contains('upserted');
+  end;
+
 end;
 
 function TgoMongoCollection.UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered: Boolean):
   Integer;
+Var Upserted:Boolean;
 begin
-  Result := Update(AFilter, AUpdate, AUpsert, AOrdered, True);
+  Result := Update(AFilter, AUpdate, AUpsert, AOrdered, True, Upserted);
 end;
 
-function TgoMongoCollection.UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean): Boolean;
+function TgoMongoCollection.UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert, AOrdered: Boolean; OUT AUpserted:Boolean): Integer;
 begin
-  Result := (Update(AFilter, AUpdate, AUpsert, false, false) = 1);
+  Result := Update(AFilter, AUpdate, AUpsert, AOrdered, True, aUpserted);
+end;
+
+
+function TgoMongoCollection.UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean): Boolean;
+Var Upserted:Boolean;
+begin
+  Result := (Update(AFilter, AUpdate, AUpsert, false, false, Upserted) = 1);
+end;
+
+function TgoMongoCollection.UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert: Boolean; OUT AUpserted:Boolean): Boolean;
+begin
+  Result := (Update(AFilter, AUpdate, AUpsert, false, false, AUpserted) = 1);
 end;
 
 function TgoMongoCollection._GetDatabase: IgoMongoDatabase;
