@@ -497,16 +497,112 @@ type
     procedure fromJson(const aJson: string);
   end;
 
+
+
+  (*igoAggregationPipeline
+
+  Fluent interface for MongoDB aggregate().
+  Use the "aggPipeline" class factory to create an instance.
+
+
+  !!! UNDER DEVELOPMENT, not tested yet !!!
+
+
+  MongoDB Aggregates have lots and lots of possible stages, therefore
+  this interface can only implement a subset and may be extended as
+  needed.
+
+
+
+
+  Methods:
+
+  "BatchSize" optionally specifies the number of elements per batch in the cursor,
+
+  "MaxTimeMS" optionally specifies the timeout of the filter
+
+  "Stage"     can be used to manually create a complex pipeline stage for which no
+              methods were implemented here. Please omit the leading $ in the stage name.
+
+  "Match"     implements the $match stage and takes a tgoMongofilter as input,
+  "Limit"     limits the number of results,
+  "Sort"      implements the $sort stage and takes a tgoMongoSort as input,
+  "Project"   implements the $project stage and takes a tgoMongoProjection as input,
+
+  "Set"       implements the $set stage and is a synonym for $addfields.
+              --> If the value is a reference to a field, precede it with a dollar.
+                  Set([tgobsonelement.create('firstname','$lastname')])
+
+  "Unset"     implements the $unset stage,
+
+  "Group"     implements the $group stage, which also allows to do stuff like min/max/avg.
+              --> Field names MUST be preceded with a dollar sign.
+              see https://www.mongodb.com/docs/manual/reference/operator/aggregation/group/#mongodb-pipeline-pipe.-group
+
+              {"$group": {
+               "_id": "$product",
+               "totalSales": { "$sum": "$amount" } }
+
+
+              {"$group": {
+              "_id": {
+                "product": "$product",
+                "region": "$region"
+              },
+              "totalSales": { "$sum": "$amount" }}}
+
+
+
+
+
+
+
+
+  Function "Pipeline" retrieves the stages of the pipeline.
+
+  Note: The pipeline does not include "BatchSize" and "MaxTimeMS",
+  these are separate properties.  *)
+
+
+  igoAggregationPipeline=interface
+  ['{CE7BE794-0D4C-4B0F-88AA-223976F58CE4}']
+    Function Stage (const aStageName:String; aStageContents:tgoBsonDocument): igoAggregationPipeline; Overload;
+    Function Stage (const aStageName:String; aStageContent:tgoBsonValue): igoAggregationPipeline;  Overload;
+    Function Match(aFilter:tgoMongoFilter) : igoAggregationPipeline;
+    Function Sort(aSort:tgoMongoSort) : igoAggregationPipeline;
+    Function Limit (n:Integer):igoAggregationPipeline;
+    Function &Set  (aFields: array of tgoBsonElement) : igoAggregationPipeline;
+    Function UnSet (aFields:array of string) : igoAggregationPipeline;
+    Function Group(aGroup:tgoBsonDocument):igoAggregationPipeline;
+    Function Project(aProjection:tgoMongoProjection):igoAggregationPipeline;
+    Function BatchSize (aBatchsize:Integer):igoAggregationPipeline;
+    Function MaxTimeMS (aMS:Integer):igoAggregationPipeline;
+    Function Pipeline:TgoBsonArray;
+  end;
+
+
+
+
+
+
+
+
+
+
+
+
+
   { Represents a collection in a MongoDB database.
     Instances of this interface are aquired by calling
     IgoMongoDatabase.GetCollection. }
+
   IgoMongoCollection = interface
     ['{9822579B-1682-4FAC-81CF-A4B239777812}']
 {$REGION 'Internal Declarations'}
     function _GetDatabase: IgoMongoDatabase;
     function _GetName: string;
 {$ENDREGION 'Internal Declarations'}
-    { Inserts a single document.
+    { InsertOne: Inserts a single document.
 
       Parameters:
       ADocument: The document to insert.
@@ -515,25 +611,28 @@ type
       True if document has been successfully inserted. False if not. }
     function InsertOne(const ADocument: TgoBsonDocument): Boolean;
 
-    { Inserts many documents.
+    { InsertMany: Inserts many documents.
 
       Parameters:
       ADocuments: The documents to insert.
+
       AOrdered: Optional. If True, perform an ordered insert of the documents
       in the array, and if an error occurs with one of documents, MongoDB
       will return without processing the remaining documents in the array.
       If False, perform an unordered insert, and if an error occurs with one
       of documents, continue processing the remaining documents in the
       array.
+
       Defaults to true.
 
       Returns:
       The number of inserted documents. }
+
     function InsertMany(const ADocuments: array of TgoBsonDocument; const AOrdered: Boolean = True): Integer; overload;
     function InsertMany(const ADocuments: TArray<TgoBsonDocument>; const AOrdered: Boolean = True): Integer; overload;
     function InsertMany(const ADocuments: TEnumerable<TgoBsonDocument>; const AOrdered: Boolean = True): Integer; overload;
 
-    { Deletes a single document.
+    { DeleteOne: Deletes a single document.
 
       Parameters:
       AFilter: filter containing query operators to search for the document
@@ -542,24 +641,28 @@ type
       Returns:
       True if a document matching the filter has been found and it has
       been successfully deleted. }
+
     function DeleteOne(const AFilter: tgoMongoFilter): Boolean;
 
-    { Deletes all documents that match a filter.
+    { DeleteMany: Deletes all documents that match a filter.
 
       Parameters:
       AFilter: filter containing query operators to search for the documents
       to delete.
+
       AOrdered: Optional. If True, then when a delete statement fails, return
       without performing the remaining delete statements. If False, then
       when a delete statement fails, continue with the remaining delete
       statements, if any.
+
       Defaults to true.
 
       Returns:
       The number of documents deleted. }
+
     function DeleteMany(const AFilter: tgoMongoFilter; const AOrdered: Boolean = True): Integer;
 
-    { Updates a single document.
+    { UpdateOne: Updates a single document.
 
       Parameters:
       AFilter: filter containing query operators to search for the document
@@ -572,9 +675,11 @@ type
       Returns:
       True if a document matching the filter has been found and it has
       been successfully updated. }
-    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false): Boolean;
 
-    { Updates all documents that match a filter.
+    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false): Boolean;Overload;
+    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert: Boolean; OUT AUpserted:Boolean): Boolean; Overload;
+
+    { UpdateMany: Updates all documents that match a filter.
 
       Parameters:
       AFilter: filter containing query operators to search for the documents
@@ -590,20 +695,26 @@ type
       Defaults to true.
 
       Returns:
+
       The number of documents that match the filter. The number of documents
       that is actually updated may be less than this in case an update did
-      not result in the change of one or more documents. }
-    function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false; const AOrdered:
-      Boolean = True): Integer;
+      not result in the change of one or more documents.
 
-    { Finds the documents matching the filter.
+      AUpserted: will be TRUE if the filter found no matches and a new document was created.
+
+      }
+    function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false; const AOrdered:
+      Boolean = True): Integer; Overload;
+    function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert, AOrdered: Boolean; OUT AUpserted:Boolean): Integer;Overload;
+
+    { Find: Finds the documents matching the filter.
 
       Parameters:
 
       AOptions: a fluent interface that will let you specify all options such
       as the filter, projection, sorting.
 
-      Legacy parameters:
+      Legacy parameters, overloaded :
 
       AFilter: (optional) filter containing query operators to search for
       documents that match the filter. If not specified, then all documents
@@ -622,7 +733,7 @@ type
       be empty if there are no documents that match the filter.
       Enumerating over the result may trigger additional calls to the MongoDB
       server. }
-    function EmptyCursor: igoMongoCursor;
+
     function Find(AOptions: igoMongoFindOptions): igoMongoCursor; overload;
     function Find: igoMongoCursor; overload;
     function Find(const AFilter: tgoMongoFilter): igoMongoCursor; overload;
@@ -632,7 +743,15 @@ type
     function Find(const AFilter: tgoMongoFilter; const AProjection: TgoMongoProjection; const ASort: TgoMongoSort; aSkip: Integer = 0):
       igoMongoCursor; overload;
 
-    { Finds the first document matching the filter.
+    {Aggregate: First basic implementation of MongoDB Aggregates.
+    See igoAggregationPipeline for details}
+
+    function Aggregate(APipeLine : igoAggregationPipeline): igoMongoCursor; Overload;
+    function Aggregate(APipeLine : TgoBsonArray; aBatchSize:integer=0; aMaxTimeMS:integer=0): igoMongoCursor; Overload;
+
+
+
+    { FindOne: Finds the first document matching the filter.
 
       Parameters:
 
@@ -676,6 +795,12 @@ type
       The number of documents that match the filter. }
     function Count: Integer; overload;
     function Count(const AFilter: tgoMongoFilter): Integer; overload;
+
+    {Faster than count, but returns only an estimate of the number of documents}
+    function EstimatedDocumentCount :Integer;
+
+    {Creates an empty cursor. Used in routines that return an empty result set.}
+    function EmptyCursor: igoMongoCursor;
 
     { Creates an index in the current collection.
 
@@ -919,6 +1044,8 @@ resourcestring
   RS_MONGODB_GENERIC_ERROR = 'Unspecified error while performing MongoDB operation';
 
 function FindOptions: igoMongoFindOptions; // class factory
+function AggPipeline:igoAggregationPipeline;
+
 
 implementation
 
@@ -1151,7 +1278,7 @@ type
 
     function InsertMany(const ADocuments: PgoBsonDocument; const ACount: Integer; const AOrdered: Boolean): Integer; overload;
     function Delete(const AFilter: tgoMongoFilter; const AOrdered: Boolean; const ALimit: Integer): Integer;
-    function Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean): Integer;
+    function Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean; OUT Upserted:Boolean): Integer;
     function GetReadPreference: tgoMongoReadPreference;
     procedure SetReadPreference(const Value: tgoMongoReadPreference);
     function GetProtocol: tgoMongoProtocol;
@@ -1168,9 +1295,16 @@ type
     function DeleteOne(const AFilter: tgoMongoFilter): Boolean;
     function DeleteMany(const AFilter: tgoMongoFilter; const AOrdered: Boolean = True): Integer;
 
-    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false): Boolean;
+    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false): Boolean; Overload;
+    function UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert: Boolean; OUT AUpserted:Boolean): Boolean; Overload;
+
     function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean = false; const AOrdered:
-      Boolean = True): Integer;
+      Boolean = True): Integer;Overload;
+    function UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert, AOrdered: Boolean; OUT AUpserted:Boolean): Integer;Overload;
+
+    function Aggregate(APipeLine : tgoBsonArray;aBatchSize:integer=0; aMaxTimeMS:integer=0): igoMongoCursor; Overload;
+    function Aggregate(APipeLine : igoAggregationPipeline): igoMongoCursor; Overload;
+
     function EmptyCursor: igoMongoCursor;
     function Find: igoMongoCursor; overload;
     function Find(const AProjection: TgoMongoProjection): igoMongoCursor; overload;
@@ -1190,6 +1324,7 @@ type
 
     function Count: Integer; overload;
     function Count(const AFilter: tgoMongoFilter): Integer; overload;
+    function EstimatedDocumentCount :Integer;
 
     function CreateIndex(const AName: string; const AKeyFields: array of string; const AUnique: Boolean = false): Boolean;
     function CreateTextIndex(const AName: string; const AFields: array of string; const ALanguageOverwriteField: string = ''; const
@@ -2128,6 +2263,128 @@ begin
   Result := HandleCommandReply(Reply);
 end;
 
+
+
+
+function tgoMongoCollection.estimatedDocumentCount :Integer;
+var
+  Writer: IgoBsonWriter;
+  Reply: IgoMongoReply;
+  doc:tgoBsondocument;
+begin
+  Writer := TgoBsonWriter.Create;
+  Writer.WriteStartDocument;
+  Writer.WriteString('count', FName);
+  SpecifyDB(Writer);
+
+  doc:=tgoBsondocument.create;
+  Writer.WriteName('query');
+  Writer.WriteRawBsonDocument(doc.ToBson);  //empty query document
+
+  Writer.WriteInt32('limit', 0);
+  Writer.WriteInt32('skip', 0);
+
+  doc['level']:='local';
+  Writer.WriteName('readConcern');
+  Writer.WriteRawBsonDocument(doc.ToBson);
+
+  Writer.WriteEndDocument;
+
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
+  Result := HandleCommandReply(Reply);
+end;
+
+
+
+
+{  https://www.mongodb.com/docs/manual/reference/operator/aggregation-pipeline/#std-label-aggregation-pipeline-operator-reference
+
+  ToDO: Need to construct a fluent aggregation pipeline builder.
+  The number of options is colossal, though.
+  Maybe limit ourselves to a few common options and grow the interface as needed, step by step.
+
+
+  (INTERFACE)
+
+
+  Type iAggregationPipeline=interface
+    [SomeGuid]
+    Function Match(aFilter:tgoMongoFilter) : iAggregationPipeline;
+    Function &Set (afields:tgoBsonDocument) : iAggregationPipeline;
+    Function UnSet (afields:tgoBsonDocument) : iAggregationPipeline;
+    Function Sort(aSort:tgoMongoSort) : iAggregationPipeline;
+    Function Group(aGroup:tgoBsonDocument):iAggregationPipeline;
+    Function Limit (n:Integer)::iAggregationPipeline;
+    Function Result:TgoBsonArray;
+  end;
+
+  Function AggregationPipeline: iAggregationPipeline; //class factory
+
+  (IMPLEMENTATION)
+
+  Type tAggregationPipeline=Class (tinterfacedobject, iAggregationPipeline)
+    Function Match(aFilter:tgoMongoFilter) : iAggregationPipeline;
+    Function Sort(aSort:tgoMongoSort) : iAggregationPipeline;
+    Function Group(aGroup:tgoBsonDocument):iAggregationPipeline;
+    Function UnSet (afields:tgoBsonDocument) : iAggregationPipeline;
+    Function &Set (afields:tgoBsonDocument) : iAggregationPipeline;
+    Function Limit (n:Integer)::iAggregationPipeline;
+    Function &Result:TgoBsonArray;
+    ...
+
+
+  TODO: FindAndModify
+  https://www.mongodb.com/docs/manual/reference/command/findAndModify/#mongodb-dbcommand-dbcmd.findAndModify
+
+
+}
+
+
+
+function TgoMongoCollection.Aggregate(APipeLine : igoAggregationPipeline): igoMongoCursor;
+begin
+  result:=Aggregate(aPipeline.pipeline);
+end;
+
+
+function TgoMongoCollection.Aggregate(APipeline : TgoBsonArray; aBatchSize:integer=0; aMaxTimeMS:integer=0): igoMongoCursor;
+var
+  Writer: IgoBsonWriter;
+  Reply: IgoMongoReply;
+  cursorDoc:tgoBsonDocument;
+begin
+  Writer := TgoBsonWriter.Create;
+  Writer.WriteStartDocument;
+
+  Writer.WriteString('aggregate', fName);   // the collection name
+  SpecifyDB(Writer);
+
+  Writer.WriteName('pipeline');
+  Writer.WriteValue(APipeline);
+
+  Writer.WriteName('cursor');
+  cursorDoc:=tgoBsonDocument.create;
+  if aBatchsize<>0 then
+      cursordoc ['batchSize']:=aBatchSize; // untested yet
+  Writer.WriteValue(cursorDoc);
+
+
+  if aMaxTimeMS <>0 then
+  begin
+    writer.writeName('maxTimeMS');
+    writer.writevalue(aMaxTimeMS);
+  end;
+
+  SpecifyReadPreference(Writer);
+  Writer.WriteEndDocument;
+
+  Reply := Protocol.OpMsg(Writer.ToBson, nil, False, max(protocol.ReplyTimeout, aMaxTimeMS));
+  HandleCommandReply(Reply);
+  Result := tgoCursorHelper.CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference);
+end;
+
+
+
 constructor TgoMongoCollection.Create(const ADatabase: TgoMongoDatabase; const AName: string);
 begin
   Assert(assigned(ADatabase));
@@ -2505,13 +2762,14 @@ begin
   Result := (HandleCommandReply(Reply) = 1);
 end;
 
-function TgoMongoCollection.Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean):
+function TgoMongoCollection.Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean;  OUT Upserted:Boolean):
   Integer;
   // https://docs.mongodb.com/manual/reference/command/update
 var
   Writer: IgoBsonWriter;
   Reply: IgoMongoReply;
 begin
+  Upserted:=false;
   Writer := TgoBsonWriter.Create;
   Writer.WriteStartDocument;
   Writer.WriteString('update', FName);
@@ -2532,17 +2790,37 @@ begin
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
   Result := HandleCommandReply(Reply);
+
+  if aUpsert then
+  begin
+    if not Reply.FirstDoc.isNil then
+      Upserted:= reply.FirstDoc.Contains('upserted');
+  end;
+
 end;
 
 function TgoMongoCollection.UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered: Boolean):
   Integer;
+Var Upserted:Boolean;
 begin
-  Result := Update(AFilter, AUpdate, AUpsert, AOrdered, True);
+  Result := Update(AFilter, AUpdate, AUpsert, AOrdered, True, Upserted);
 end;
 
-function TgoMongoCollection.UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean): Boolean;
+function TgoMongoCollection.UpdateMany(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert, AOrdered: Boolean; OUT AUpserted:Boolean): Integer;
 begin
-  Result := (Update(AFilter, AUpdate, AUpsert, false, false) = 1);
+  Result := Update(AFilter, AUpdate, AUpsert, AOrdered, True, aUpserted);
+end;
+
+
+function TgoMongoCollection.UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert: Boolean): Boolean;
+Var Upserted:Boolean;
+begin
+  Result := (Update(AFilter, AUpdate, AUpsert, false, false, Upserted) = 1);
+end;
+
+function TgoMongoCollection.UpdateOne(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; AUpsert: Boolean; OUT AUpserted:Boolean): Boolean;
+begin
+  Result := (Update(AFilter, AUpdate, AUpsert, false, false, AUpserted) = 1);
 end;
 
 function TgoMongoCollection._GetDatabase: IgoMongoDatabase;
@@ -3107,6 +3385,7 @@ end;
 {$ENDREGION}
 //
 
+
 //
 {$REGION 'tgoConnectionPool - a connection pool for multithreaded applications.'}
 
@@ -3249,6 +3528,127 @@ procedure tgoConnectionPool.ReleaseToPool(const Client: igoMongoClient);
 begin
   Client.ReleaseToPool;
 end;
+
+{$ENDREGION}
+
+{$REGION 'igoAggregationPipeline'}
+
+type
+  tgoAggregationPipeline = class(TInterfacedObject, igoAggregationPipeline)
+    var fPipeline: TgoBsonArray;
+      fBatchSize: Integer;
+      fMaxTimeMS: Integer;
+    function Stage(const aStageName: string; aStageContents: TgoBsonDocument): igoAggregationPipeline; overload;
+    function Stage(const aStageName: string; aStageContent: tgoBsonValue): igoAggregationPipeline; overload;
+    function Match(aFilter: tgoMongoFilter): igoAggregationPipeline;
+    function sort(aSort: TgoMongoSort): igoAggregationPipeline;
+    function limit(n: Integer): igoAggregationPipeline;
+    function &Set(aFields: array of tgoBsonElement): igoAggregationPipeline;
+    function UnSet(aFields: array of string): igoAggregationPipeline;
+    function Group(aGroup: TgoBsonDocument): igoAggregationPipeline;
+    function Project(aProjection: TgoMongoProjection): igoAggregationPipeline;
+    function BatchSize(aBatchsize: Integer): igoAggregationPipeline;
+    function MaxTimeMS(aMS: Integer): igoAggregationPipeline;
+    function Pipeline: TgoBsonArray;
+    constructor Create;
+  end;
+
+function tgoAggregationPipeline.Pipeline: TgoBsonArray;
+begin
+  Result := fPipeline;
+end;
+
+constructor tgoAggregationPipeline.Create;
+begin
+  inherited Create;
+  fPipeline := TgoBsonArray.Create;
+end;
+
+function tgoAggregationPipeline.Stage(const aStageName: string; aStageContents: TgoBsonDocument): igoAggregationPipeline;
+var
+  Doc: TgoBsonDocument;
+begin
+  Doc := TgoBsonDocument.Create;
+  Doc['$' + aStageName] := aStageContents;
+  fPipeline.add(Doc);
+  Result := Self;
+end;
+
+function tgoAggregationPipeline.Stage(const aStageName: string; aStageContent: tgoBsonValue): igoAggregationPipeline;
+var
+  Doc: TgoBsonDocument;
+begin
+  Doc := TgoBsonDocument.Create;
+  Doc['$' + aStageName] := aStageContent;
+  fPipeline.add(Doc);
+  Result := Self;
+end;
+
+function tgoAggregationPipeline.Match(aFilter: tgoMongoFilter): igoAggregationPipeline;
+begin
+  Result := Stage('match', aFilter.Render);
+end;
+
+function tgoAggregationPipeline.sort(aSort: TgoMongoSort): igoAggregationPipeline;
+begin
+  Result := Stage('sort', aSort.Render);
+end;
+
+function tgoAggregationPipeline.limit(n: Integer): igoAggregationPipeline;
+begin
+  Result := Stage('limit', n);
+end;
+
+function AggPipeline: igoAggregationPipeline;
+begin
+  Result := tgoAggregationPipeline.Create;
+end;
+
+function tgoAggregationPipeline.&Set(aFields: array of tgoBsonElement): igoAggregationPipeline;
+var
+  Doc: TgoBsonDocument;
+  afield: tgoBsonElement;
+begin
+  Doc := TgoBsonDocument.Create;
+  for afield in aFields do
+    Doc.add(afield);
+  Result := Stage('set', Doc);
+end;
+
+function tgoAggregationPipeline.Group(aGroup: TgoBsonDocument): igoAggregationPipeline;
+begin
+  Result := Stage('group', aGroup);
+end;
+
+function tgoAggregationPipeline.UnSet(aFields: array of string): igoAggregationPipeline;
+var
+  arr: TgoBsonArray;
+  afield: string;
+begin
+  arr := TgoBsonArray.Create;
+  for afield in aFields do
+    arr.add(afield);
+  Result := Stage('unset', arr);
+end;
+
+function tgoAggregationPipeline.Project(aProjection: TgoMongoProjection): igoAggregationPipeline;
+begin
+  Result := Stage('project', aProjection.Render);
+end;
+
+function tgoAggregationPipeline.batchSize(aBatchsize: Integer): igoAggregationPipeline;
+begin
+  Result := Self;
+  fBatchSize := aBatchsize;
+end;
+
+function tgoAggregationPipeline.maxTimeMS(aMS: Integer): igoAggregationPipeline;
+begin
+  Result := Self;
+  fMaxTimeMS := aMS;
+end;
+
+
 
 {$ENDREGION}
 
