@@ -376,8 +376,8 @@ type
 
     procedure ReadData(const ABuffer: Pointer; const ASize: Integer);
     constructor Create(const ABuffer: Pointer; const ASize: Integer);
-    constructor CreateFromError(aReplyTo: Int64; aCode: Integer; aErrMsg,
-        aCodeName: String);
+    constructor CreateFromError(aReplyTo, aCode: Integer; aErrMsg, aCodeName:
+        String);
 
   end;
 
@@ -1377,11 +1377,14 @@ begin
 end;
 
 
-class Function tgoMongoProtocol.IsInternalError(Const errorcode:integer):Boolean;
+class function TgoMongoProtocol.IsInternalError(const errorcode: Integer): Boolean;
 begin
-   if (errorcode=146) or (errorcode=147) or (errorcode=301)
-   then result:=True
-   else result:=false;
+  case errorcode of
+    146, 147, 301:
+      result := True;
+  else
+    result := False;
+  end;
 end;
 
 procedure TgoMongoProtocol.SocketRecv(const ABuffer: Pointer; const ASize: Integer);
@@ -1392,18 +1395,18 @@ procedure TgoMongoProtocol.SocketRecv(const ABuffer: Pointer; const ASize: Integ
     FRecvSize := 0;
   end;
 
-  procedure RemoveBytes(numbytes: Integer);
+  procedure RemoveBytes(NumBytes: Integer);
   var
     BytesLeft: Integer;
   begin
-    if (numbytes >= FRecvSize) then
+    if (NumBytes >= FRecvSize) then
       ClearBuffer
     else
     begin
-      BytesLeft := FRecvSize - numbytes;
+      BytesLeft := FRecvSize - NumBytes;
       if BytesLeft > 0 then // should always be true
       begin
-        move(FRecvBuffer[numbytes], FRecvBuffer[0], BytesLeft);
+        move(FRecvBuffer[NumBytes], FRecvBuffer[0], BytesLeft);
         FRecvSize := BytesLeft;
       end
       else
@@ -1413,14 +1416,15 @@ procedure TgoMongoProtocol.SocketRecv(const ABuffer: Pointer; const ASize: Integ
 
   procedure QueueReply(AReply: IgoMongoReply);
   var
-    Waiter: TEvent;
+    Waiter: TEvent;  ID:Integer;
   begin
+    ID:=AReply.ResponseTo;
+    Waiter := nil;
     FRepliesLock.Acquire;
     try
-      Waiter := nil;
-      FPartialReplies.Remove(AReply.ResponseTo); //no longer needed
-      FCompletedReplies.AddOrSetValue(AReply.ResponseTo, AReply); //Add the completed reply to the dictionary.
-      fReplyEvents.TryGetValue(AReply.ResponseTo, Waiter);
+      FPartialReplies.Remove(ID); //no longer needed
+      FCompletedReplies.AddOrSetValue(ID, AReply); //Add the completed reply to the dictionary.
+      fReplyEvents.TryGetValue(ID, Waiter);
     finally
       FRepliesLock.Release;
       if Assigned(Waiter) then  //if a tevent is waiting for this reply, fire it!
@@ -1428,7 +1432,7 @@ procedure TgoMongoProtocol.SocketRecv(const ABuffer: Pointer; const ASize: Integ
     end;
   end;
 
-  procedure ReportError (aErrorcode:integer; aResponseTo:Integer;  aErrorText, aErrorMnemonic:String);
+  procedure ReportError (aResponseTo, aErrorcode:Integer; aErrorText, aErrorMnemonic:String);
     var MsgHeader: TMsgHeader;
   begin
        // Is there at least a partial reply in the input buffer, so we know the ID of the
@@ -1439,15 +1443,18 @@ procedure TgoMongoProtocol.SocketRecv(const ABuffer: Pointer; const ASize: Integ
 
 var
   MongoReply: IgoMongoReply;
-  ProcessedBytes: Integer;
+  ProcessedBytes, ID: Integer;
   MsgHeader: TMsgHeader;
   Validation:tgoReplyValidationResult;
-  HaveHeader:boolean;
+  HaveHeader:Boolean;
 begin
+  ID:=0;
   try
     FRecvBufferLock.Enter;
     try
       HaveHeader:=HaveReplyMsgHeader(MsgHeader);
+      if HaveHeader then
+         ID:=MsgHeader.ResponseTo;
 
       if EnsureCapacity(FRecvSize + ASize) then
       begin
@@ -1459,7 +1466,7 @@ begin
       begin
         { If at least the header is complete, post an "out of memory" reply so op_msg can react accordingly. }
         if HaveHeader then
-           ReportError(146, MsgHeader.ResponseTo,'Buffer exceeded Memory Limit', 'ExceededMemoryLimit');
+           ReportError(ID, 146, 'Buffer exceeded Memory Limit', 'ExceededMemoryLimit');
         ClearBuffer;
         Exit; // --> finally
       end;
@@ -1468,6 +1475,8 @@ begin
       Repeat
         Validation:=TgoMongoMsgReply.ValidateMessage(FRecvBuffer, FRecvSize, ProcessedBytes, MongoReply) ;
         HaveHeader:=HaveReplyMsgHeader(MsgHeader);
+        if HaveHeader then
+           ID:=MsgHeader.ResponseTo;
 
         case Validation of
 
@@ -1486,7 +1495,7 @@ begin
               // header opcode is valid but message still growing/incomplete
               // Update the partial reply timestamp
               if HaveHeader then
-                UpdateReplyTimeout(MsgHeader.ResponseTo);
+                UpdateReplyTimeout(ID);
               Break; // --> finally
             end;
 
@@ -1501,7 +1510,7 @@ begin
           tgoReplyValidationResult.rvrCompressorError, tgoReplyValidationResult.rvrCompressorNotSupported:
             begin
               if HaveHeader then
-                 ReportError(147, MsgHeader.ResponseTo, 'Compressor: Expansion error or compressor not supported', 'ZLibError');
+                 ReportError(ID, 147, 'Compressor: Expansion error or compressor not supported', 'ZLibError');
               ClearBuffer;
               Break;   // --> finally
             end;
@@ -1509,7 +1518,7 @@ begin
           tgoReplyValidationResult.rvrDataError, tgoReplyValidationResult.rvrChecksumInvalid:
             begin
               if HaveHeader then
-                ReportError(301, MsgHeader.ResponseTo, 'Data Corruption Detected', 'DataCorruptionDetected');
+                ReportError(ID, 301, 'Data Corruption Detected', 'DataCorruptionDetected');
               ClearBuffer;
               Break;  // --> finally
             end;
@@ -1587,30 +1596,31 @@ begin
   result := (self.OpCode = OP_MSG) or (self.OpCode = OP_COMPRESSED);
 end;
 
-constructor TgoMongoMsgReply.CreateFromError(aReplyTo: Int64; aCode: Integer;  aErrMsg, aCodeName: String);
-begin
-  inherited create;
-  FHeader.Header.ResponseTo:=aReplyTo;
-  FHeader.Header.opcode:=OP_MSG;
-  fFirstDoc := TgoBsonDocument.Create;
+{ TgoMongoMsgReply }
 
+constructor TgoMongoMsgReply.CreateFromError(aReplyTo, aCode: Integer; aErrMsg, aCodeName: String);
+begin
+  inherited Create;
+  FHeader.Header.ResponseTo:=aReplyTo;
+  FHeader.Header.OpCode:=OP_MSG;
+  //The other fields in fHeader are irrelevant for opmsg() and HandleCommandReply()
+
+  fFirstDoc := TgoBsonDocument.Create;
   if aCode <> 0 then
   begin
-    fFirstDoc['ok'] := 0;   //false
-    fFirstDoc['code'] := aCode;
+    fFirstDoc['ok'] := 0;   //indicates error
+    fFirstDoc['code'] := aCode; //the error code
     if aErrMsg <> '' then
-      fFirstDoc['errmsg'] := aErrMsg;
+      fFirstDoc['errmsg'] := aErrMsg; //the error message
     if aCodeName <> '' then
-      fFirstDoc['codeName'] := aCodeName;
+      fFirstDoc['codeName'] := aCodeName; //the error mnemonic
   end
   else
-    fFirstDoc['ok'] := 1;
+    fFirstDoc['ok'] := 1; //indicates no error
 
-  self.FPayload0:=self.FPayload0+[fFirstDoc.ToBson];
+  self.FPayload0:=self.FPayload0+[fFirstDoc.ToBson];  //redundant
 end;
 
-
-{ TgoMongoMsgReply }
 
 // Read data from a previously validated data buffer
 procedure TgoMongoMsgReply.ReadData(const ABuffer: Pointer; const ASize: Integer);
@@ -1658,16 +1668,16 @@ begin
   end;
 end;
 
-// Validate a message in OP_MSG format
+// Validate an UNCOMPRESSED op_msg packet. Create an igoMongoReply if the packet is valid.
 
 class function TgoMongoMsgReply.ValidateOPMessage(const ABuffer: tBytes; const ASize: Integer; var aSizeRead: Integer; out AReply:
   IgoMongoReply): tgoReplyValidationResult;
 var
   DocBuf: TArray<tBytes>;
-  data: Pointer;
+  Data: Pointer;
   StartOfData, Avail: Integer;
   PayloadType: Byte;
-  seqname: string;
+  SeqName: String;
   pHeader: POpMsgHeader;
   SizeRead, Type0Docs: Integer;
   AllBytesRead, HasChecksum: Boolean;
@@ -1679,7 +1689,6 @@ var
   end;
 
 begin
-  result := tgoReplyValidationResult.rvrNoHeader; // Buffer does not contain enough bytes for a header
   AReply := nil;
   SizeRead := 0;
   Type0Docs := 0;
@@ -1691,22 +1700,22 @@ begin
       begin
         if ASize >= pHeader.Header.MessageLength then
         begin
-          StartOfData := sizeof(TOPMSGHeader); // data starts right after the header
+          StartOfData := sizeof(TOPMSGHeader); // Data starts right after the header
           aSizeRead := StartOfData;
-          data := @ABuffer[StartOfData];
+          Data := @ABuffer[StartOfData];
           Avail := pHeader.Header.MessageLength - StartOfData;
           HasChecksum := TGoMongoMsgFlag.msgfChecksumPresent in pHeader.flagbits;
 
           if (not HasChecksum) or ChecksumOK() then // needs compiler switch $B-
           begin
             repeat
-              case tMsgPayload.DecodeSequence(True, data, Avail, SizeRead, PayloadType, seqname, DocBuf) of
+              case tMsgPayload.DecodeSequence(True, Data, Avail, SizeRead, PayloadType, SeqName, DocBuf) of
                 tgoPayloadDecodeResult.pdOK:
                   begin
                     if PayloadType = 0 then
                       inc(Type0Docs);
                     Avail := Avail - SizeRead;
-                    inc(intptr(data), SizeRead);
+                    inc(intptr(Data), SizeRead);
                     inc(aSizeRead, SizeRead);
                   end;
 
@@ -1743,7 +1752,7 @@ begin
           end // if checksum OK
           else
             result := tgoReplyValidationResult.rvrChecksumInvalid; // Header opcode OK, message could be complete, CRC fails
-        end // if aSize big enough for data
+        end // if aSize big enough for Data
         else
           result := tgoReplyValidationResult.rvrGrowing; // Header opcode OK, but message not complete yet
       end // if valid opcode
@@ -1753,10 +1762,14 @@ begin
     else
       result := tgoReplyValidationResult.rvrNoHeader; // Buffer does not contain enough bytes for a header
   except
-     result := tgoReplyValidationResult.rvrDataError; //could be OutOfMemory
+     result := tgoReplyValidationResult.rvrDataError; //could be OutOfMemory as well
     // no exceptions allowed to exit
   end;
 end;
+
+// Validate a OP_MSG packet, which may be either compressed or uncompressed.
+// Decompress if necessary.
+// Create a iGoMongoReply if the packet is valid.
 
 class function TgoMongoMsgReply.ValidateMessage(const ABuffer: tBytes; const ASize: Integer; var aSizeRead: Integer; out AReply:
   IgoMongoReply): tgoReplyValidationResult;
