@@ -10,7 +10,7 @@ uses
   Grijjy.MongoDB.Queries;
 
 type
-  TgoDocCallback=reference to procedure(doc: tgoBsonDocument);
+  tgoDocEditor=reference to procedure(doc: tgoBsonDocument);
 
 
 
@@ -505,7 +505,7 @@ type
 
   (*igoAggregationPipeline           !!! UNDER DEVELOPMENT !!!
 
-  Fluent interface for MongoDB collection.aggregate().
+  Fluent aggregate pipeline builder for MongoDB collection.aggregate().
 
   See https://www.mongodb.com/docs/manual/reference/operator/aggregation/
 
@@ -527,75 +527,119 @@ type
   "MaxTimeMS" Not a stage, this optionally specifies the timeout of the filter
 
   "Stage"     Manually creates a new pipeline stage. Please omit the leading $
-              in the stage name.
+              in the stage name. It either
+              - takes a tgoBsonDocument as input,
+              - OR a string that contains such a document in JSON syntax,
+              - OR an anonymous method that fills the document with data.
 
-  "Match"     Implements the $match stage and takes a tgoMongofilter as input,
 
-  "Limit"     Implements the $limit stage, which limits the number of results,
+  "Match"     see https://www.mongodb.com/docs/manual/reference/operator/aggregation/match/#mongodb-pipeline-pipe.-match
+              Implements the $match stage and either:
+              - takes a tgoMongofilter as input,
+              - OR a string that contains a document in JSON syntax,
+              - OR an anonymous method that fills the document with data.
+
+
+  "Limit"     see https://www.mongodb.com/docs/manual/reference/operator/aggregation/limit/#mongodb-pipeline-pipe.-limit
+              Implements the $limit stage, which limits the number of results,
               it lets at most N records pass.
 
-  "AddFields" Implements the $addFields stage. Used to add (calculated?) fields.
-              --> If the value is a reference to a field, precede it with a dollar.
-                  Addfields([tgobsonelement.create('firstname','$lastname')])
+  "AddFields" see https://www.mongodb.com/docs/manual/reference/operator/aggregation/addFields/
+              Implements the $addFields stage. Used to add new (possibly
+              calculated) fields to the documents.
+              References to field contents must have a leading $.
+              It either
+              - takes a tgoBsonDocument as input,
+              - OR a string that contains a document in JSON syntax,
+              - OR an anonymous method that fills the document with data.
 
   "Set"       Implements the $set stage and is a synonym for $addfields.
 
   "Unset"     Implements the $unset stage, removes fields.
 
-  "Sort"      Implements the $sort stage, takes a tgoMongoSort as input,
+  "Sort"      Implements the $sort stage, it either
+                - takes a tgoMongoSort as input,
+                - OR a tgoBsonDocument,
+                - OR a string that contains a document in JSON syntax,
+                - OR an anonymous method that fills the document with data.
 
-  "Project"   Implements the $project stage, takes a tgoMongoProjection as input,
 
-  "Group"     Implements the $group stage, which is used to do calculate stuff
-              like min/max/avg and to compute totals.
+  "Project"   see https://www.mongodb.com/docs/manual/reference/operator/aggregation/project/#mongodb-pipeline-pipe.-project
+              Implements the $project stage. It either:
+                - takes a tgoMongoProjection as input,
+                - OR a tgoBsonDocument,
+                - OR a string that contains a document in JSON syntax,
+                - OR an anonymous method that fills the document with data.
 
-              --> Field names MUST be preceded with a dollar sign.
-              see https://www.mongodb.com/docs/manual/reference/operator/aggregation/group/#mongodb-pipeline-pipe.-group
+
+  "Group"     see https://www.mongodb.com/docs/manual/reference/operator/aggregation/group/#mongodb-pipeline-pipe.-group
+
+              Implements the $group stage, which is used to define a grouping
+              key ("_id") and to compute stuff like min/max/avg/totals over the
+              grouping interval. References to field contents MUST be preceded
+              with a dollar sign.  It either:
+
+                - takes a tgoBsonDocument as input,
+                - OR a string that contains a document in JSON syntax,
+                - OR an anonymous method that fills the document with data.
+
+  "Out"       see https://www.mongodb.com/docs/manual/reference/operator/aggregation/out/#mongodb-pipeline-pipe.-out
+              The $out stage routes the output of the aggregation pipeline into a new
+              collection. It must be the LAST item in the pipeline and the
+              collection.aggregate() method will return an empty cursor after
+              the out stage. This stage is practical for debugging because
+              you can easily review the data.
+
 
   "Edit"      This is not a stage but it lets you edit/modify the stage that was last defined,
-              using an anonymous callback method. It is extremely practical if you want
-              to keep the "group" stage simple and add aggregated fields later.
+              using an anonymous callback method. This is extremely practical if you want
+              to keep a complex stage such as "group" simple and add aggregated fields
+              later in a separate anonymous method.
 
 
-  "Out"       The $out stage routes the output of the aggregation pipeline into a new
-              collection. It must be the LAST item in the pipeline.
-              The aggregate will return an empty cursor after the $out stage.
-
-
-  "Pipeline"  This function retrieves the stages of the pipeline as a tgoBsonArray.
+  "Pipeline"  This function retrieves all the stages of the pipeline as a tgoBsonArray.
               However, you are advised to pass the whole igoAggregationPipeline interface
               directly to the collection.aggregate() method, because that will
-              includes the "BatchSize" and "MaxTimeMS" properties which are not
-              stages.
+              include the "BatchSize" and "MaxTimeMS" properties.
+              Those properties are not stages.
   *)
 
 
   igoAggregationPipeline=interface
   ['{CE7BE794-0D4C-4B0F-88AA-223976F58CE4}']
-    Function Stage (const aStageName:String; aStageDocJS:String): igoAggregationPipeline; Overload;
-    Function Stage (const aStageName:String; aStageContent:tgoBsonValue): igoAggregationPipeline;  Overload;
 
-    Function AddFields (aNewfieldsDoc: tgoBsonDocument): igoAggregationPipeline;overload;
-    Function AddFields(aNewfieldsDocJS: String): igoAggregationPipeline;overload;
+    Function Stage (const aStageName:String; aStageContent:tgoBsonValue): igoAggregationPipeline;  Overload;
+    Function Stage (const aStageName:String; aStageDocJS:String): igoAggregationPipeline; Overload;
+    Function Stage (const aStageName:String; aStageProc:tgoDocEditor): igoAggregationPipeline;  Overload;
+
+    Function AddFields  (aNewfieldsDoc: tgoBsonDocument): igoAggregationPipeline;overload;
+    Function AddFields  (aNewfieldsDocJS: String): igoAggregationPipeline;overload;
+    Function AddFields  (aNewFieldsProc:tgoDocEditor): igoAggregationPipeline;overload;
 
     Function Match(aFilter:tgoMongoFilter) : igoAggregationPipeline;overload;
     Function Match(aFilterDocJs:String) : igoAggregationPipeline;overload;
+    Function Match(aFilterProc:tgoDocEditor): igoAggregationPipeline;overload;
 
     Function Group (aGroupDoc:tgoBsonDocument):igoAggregationPipeline; overload;
     Function Group (aGroupDocJS:String):igoAggregationPipeline; overload;
+    Function Group(aGroupProc:tgoDocEditor): igoAggregationPipeline;overload;
 
     Function Sort(aSort:tgoMongoSort) : igoAggregationPipeline;Overload;
-    function sort(aSortDocJS: String): igoAggregationPipeline; Overload;
+    Function Sort(aSortDoc:tgoBsonDocument) : igoAggregationPipeline;Overload;
+    function Sort(aSortDocJS: String): igoAggregationPipeline; Overload;
+    Function Sort(aSortProc:tgoDocEditor): igoAggregationPipeline; Overload;
 
     Function Limit (n:Integer):igoAggregationPipeline;
     Function &Set  (aFields: array of tgoBsonElement) : igoAggregationPipeline;
     Function UnSet (aFields:array of string) : igoAggregationPipeline;
 
-    Function Edit (aEditor:TgoDocCallback)   :igoAggregationPipeline; Overload;
-    Function Edit (aStagenr:Integer; aEditor:TgoDocCallback)   :igoAggregationPipeline; Overload;
+    Function Edit (aEditor:tgoDocEditor)   :igoAggregationPipeline; Overload;
+    Function Edit (aStagenr:Integer; aEditor:tgoDocEditor)   :igoAggregationPipeline; Overload;
 
     Function Project(aProjection:tgoMongoProjection):igoAggregationPipeline; Overload;
+    Function Project(aProjectionDoc:tgoBsonDocument):igoAggregationPipeline; Overload;
     Function Project(aProjectionDocJS: String): igoAggregationPipeline;Overload;
+    Function Project(aProjectionProc: tgoDocEditor): igoAggregationPipeline;Overload;
 
     Function &Out (const aOutputCollection:String): igoAggregationPipeline;Overload;
     Function &Out (const aOutputDB, aOutputCollection:String): igoAggregationPipeline;Overload;
@@ -1064,12 +1108,94 @@ type
     class function FirstDoc(const Docs: tArray<tgoBsonDocument>): tgoBsonDocument;
   end;
 
+
+tgoMongoExpression = class
+    class function AsDoc(const json: string): tgoBsonDocument; static;
+
+    //Field reference
+    class function ref(const FieldName: string): string; static; //reference to a field. fieldname --> "$fieldname"
+
+    //&Const values
+    class function &const(const ConstantValue: string): string; overload; static; //  string.  John  --> "John".
+    class function &const(const ConstantValue: int64): string; overload; static; // integer. 500   --> 500
+    class function &const(const ConstantValue: Boolean): string; overload; static; // boolean. input --> true or false.
+    class function &const(const ConstantValue: Double; Decimals: integer): string; overload; static; //Float. pi,4 --> 3.1415
+
+    //Conversions
+    class function toBool(const Expr: string): string; static; //convert expression to boolean
+    class function toDate(const Expr: string): string; static; //convert expression to date
+    class function toString(const Expr: string): string; reintroduce; static; //convert expression to string
+    class function toInt(const Expr: string): string; static; //convert expression to int32
+    class function toLong(const Expr: string): string; static; //convert expression (date...) to long
+    class function toDecimal(const Expr: string): string; static; //convert expression to decimal
+    class function toDouble(const Expr: string): string; static; //convert expression to double
+    class function toObjectID(const Expr: string): string; static; //convert expression to objectid
+    class function toLower(const Expr: string): string; static; //convert expression to lower case
+    class function toUpper(const Expr: string): string; static; //convert expression to upper case
+    class function toUUID(const Expr: string): string; static; //convert expression to UUID
+
+    //Rounding
+    class function ceil(const Expr: string): string; static; //round a float or decimal up if it isn't an integer
+    class function floor(const Expr: string): string; static; //round a float or decimal down if it isn't an integer
+    class function round(const Expr: string; const place: string = '0'): string; static; //round a number up or down to "place" decimals
+    class function trunc(const Expr: string; const place: string = '0'): string; static; //truncate a float or decimal to "place" decimals
+
+    //Basic math
+    class function add(const Expr1, Expr2: string): string; static; //add two numbers
+    class function subtract(const Expr1, Expr2: string): string; static; //subtract two numbers
+    class function multiply(const Expr1, Expr2: string): string; static; //multiply two numbers
+    class function divide(const Expr1, Expr2: string): string; static; //divide two numbers
+
+    //Aggregation
+    class function first(const Expr: string): string; static; //Eval expression for first record in a group
+    class function last(const Expr: string): string; static; //Eval expression for last record in a group
+    class function avg(const Expr: string): string; static; //calc avg value or expression for all records in a group
+    class function max(const Expr: string): string; static; //calc max value or expression for all records in a group
+    class function min(const Expr: string): string; static; //calc min value or expression for all records in a group
+
+    //Basic string manipulation
+    class function concat(const Expr: array of string): string; static; //concatenate strings
+    class function &array(const Expr: array of string): string; static; //convert x expressions into a json array
+    class function split(const Expr, Delimiter: string): string; static; //Split a string into an array
+    class function substr(const Expr, start, len: string): string; static; // Extract a substring
+    class function ltrim(const Expr: string; const NumChars: string = ''): string; static; //Trim whitespace left OR remove N chars left
+    class function rtrim(const Expr: string; const NumChars: string = ''): string; static; //Trim whitespace right OR remove N chars right
+
+    //comparison with integer result
+    class function cmp(const Expr1, Expr2: string): string; static; //compare two numbers, return an integer
+
+    //Comparison with boolean result
+    class function &eq(const Expr1, Expr2: string): string; static;
+    class function gt(const Expr1, Expr2: string): string; static;
+    class function gte(const Expr1, Expr2: string): string; static;
+    class function lt(const Expr1, Expr2: string): string; static;
+    class function lte(const Expr1, Expr2: string): string; static;
+
+    //operators with boolean result
+    class function &and(const Expr: array of string): string; static;
+    class function &or(const Expr: array of string): string; static;
+    class function &not(const Expr: string): string; static;
+  end;
+
+
+
+
+function FindOptions: igoMongoFindOptions; // class factory
+
+
+Type Aggregate=class
+  private
+    type tgoMongoExpressionClass = class of tgoMongoExpression;
+  public
+   class function CreatePipeline:igoAggregationPipeline; //class factory
+   class function Expression: tgoMongoExpressionClass;
+end;
+
+
+
 resourcestring
   RS_MONGODB_CONNECTION_ERROR = 'Error connecting to the MongoDB database';
   RS_MONGODB_GENERIC_ERROR = 'Unspecified error while performing MongoDB operation';
-
-function FindOptions: igoMongoFindOptions; // class factory
-function AggPipeline:igoAggregationPipeline;
 
 
 implementation
@@ -1081,6 +1207,9 @@ const
   NoCursorID = 0;
 
 {$POINTERMATH ON}
+
+
+
 
 
 
@@ -3521,7 +3650,7 @@ end;
 
 {$ENDREGION}
 
-{$REGION 'igoAggregationPipeline'}
+{$REGION 'igoAggregationPipeline - a fluent aggregation pipeline builder'}
 
 type
   tgoAggregationPipeline = class(TInterfacedObject, igoAggregationPipeline)
@@ -3533,21 +3662,24 @@ type
   Public
     function Stage(const aStageName: string; aStageDocJS: string): igoAggregationPipeline; overload;
     function Stage(const aStageName: string; aStageContent: tgoBsonValue): igoAggregationPipeline; overload;
-
-    function Edit(aEditor: TgoDocCallback): igoAggregationPipeline; overload;
-    function Edit(aStagenr: Integer; aEditor: TgoDocCallback): igoAggregationPipeline; overload;
+    function Stage (const aStageName:String; aStageProc:tgoDocEditor): igoAggregationPipeline;  Overload;
 
     function AddFields(aNewfieldsDoc: tgoBsonDocument): igoAggregationPipeline; overload;
     function AddFields(aNewfieldsDocJS: string): igoAggregationPipeline; overload;
+    Function AddFields(aNewFieldsProc:tgoDocEditor): igoAggregationPipeline;overload;
 
     function Match(aFilter: tgoMongoFilter): igoAggregationPipeline; overload;
     function Match(aFilterDocJs: string): igoAggregationPipeline; overload;
+    function Match(aFilterProc:tgoDocEditor): igoAggregationPipeline;overload;
 
     function Group(aGroupDoc: tgoBsonDocument): igoAggregationPipeline; overload;
     function Group(aGroupDocJS: string): igoAggregationPipeline; overload;
+    function Group(aGroupProc:tgoDocEditor): igoAggregationPipeline;overload;
 
-    function sort(aSort: TgoMongoSort): igoAggregationPipeline; overload;
-    function sort(aSortDocJS: string): igoAggregationPipeline; overload;
+    function Sort(aSort: TgoMongoSort): igoAggregationPipeline; overload;
+    function Sort(aSortDoc:tgoBsonDocument) : igoAggregationPipeline;Overload;
+    function Sort(aSortDocJS: string): igoAggregationPipeline; overload;
+    function Sort(aSortProc:tgoDocEditor): igoAggregationPipeline; Overload;
 
     function limit(n: Integer): igoAggregationPipeline;
     function &Set(aFields: array of tgoBsonElement): igoAggregationPipeline;
@@ -3555,12 +3687,17 @@ type
 
     function Project(aProjection: TgoMongoProjection): igoAggregationPipeline; overload;
     function Project(aProjectionDocJS: string): igoAggregationPipeline; overload;
+    Function Project(aProjectionProc: tgoDocEditor): igoAggregationPipeline;Overload;
+    Function Project(aProjectionDoc:tgoBsonDocument):igoAggregationPipeline; Overload;
 
     function BatchSize(aBatchsize: Integer): igoAggregationPipeline;
     function MaxTimeMS(aMS: Integer): igoAggregationPipeline;
 
     function &Out(const aOutputCollection: string): igoAggregationPipeline; overload;
     function &Out(const aOutputDB, aOutputCollection: string): igoAggregationPipeline; overload;
+
+    function Edit(aEditor: tgoDocEditor): igoAggregationPipeline; overload;
+    function Edit(aStagenr: Integer; aEditor: tgoDocEditor): igoAggregationPipeline; overload;
 
     function Pipeline: TgoBsonArray;
     constructor Create;
@@ -3570,6 +3707,7 @@ function tgoAggregationPipeline.Pipeline: TgoBsonArray;
 begin
   Result := fPipeline;
 end;
+
 
 constructor tgoAggregationPipeline.Create;
 begin
@@ -3595,6 +3733,16 @@ begin
   Result := Stage(aStageName, reader.ReadDocument);
 end;
 
+Function tgoAggregationPipeline.Stage (const aStageName:String; aStageProc:tgoDocEditor): igoAggregationPipeline;
+var doc:tgoBsondocument;
+begin
+     Assert(assigned(aStageProc));
+     doc:=tgoBsondocument.create;
+     aStageproc(doc);
+     result:=Stage(astagename, Doc);
+end;
+
+
 function tgoAggregationPipeline.Match(aFilter: tgoMongoFilter): igoAggregationPipeline;
 begin
   Result := Stage('match', aFilter.Render);
@@ -3604,6 +3752,12 @@ function tgoAggregationPipeline.Match(aFilterDocJs: string): igoAggregationPipel
 begin
   Result := Stage('match', aFilterDocJs);
 end;
+
+function tgoAggregationPipeline.Match(aFilterProc: tgoDocEditor): igoAggregationPipeline;
+begin
+   Result := Stage('match', aFilterProc);
+end;
+
 
 function tgoAggregationPipeline.sort(aSort: TgoMongoSort): igoAggregationPipeline;
 begin
@@ -3616,6 +3770,17 @@ begin
   Result := Stage('sort', aSortDocJS);
 end;
 
+function tgoAggregationPipeline.Sort(aSortProc: tgoDocEditor): igoAggregationPipeline;
+begin
+  Result := Stage('sort', aSortProc);
+end;
+
+
+function tgoAggregationPipeline.Sort(aSortDoc: tgoBsonDocument): igoAggregationPipeline;
+begin
+  Result := Stage('sort', aSortDoc);
+end;
+
 function tgoAggregationPipeline.limit(n: Integer): igoAggregationPipeline;
 var
   t: tgoBsonValue;
@@ -3624,10 +3789,6 @@ begin
   Result := Stage('limit', t);
 end;
 
-function AggPipeline: igoAggregationPipeline;
-begin
-  Result := tgoAggregationPipeline.Create;
-end;
 
 function tgoAggregationPipeline.&Set(aFields: array of tgoBsonElement): igoAggregationPipeline;
 var
@@ -3651,6 +3812,11 @@ begin
   Result := Stage('group', aGroupDocJS);
 end;
 
+function tgoAggregationPipeline.Group(aGroupProc: tgoDocEditor): igoAggregationPipeline;
+begin
+  Result := Stage('group', aGroupProc);
+end;
+
 function tgoAggregationPipeline.UnSet(aFields: array of string): igoAggregationPipeline;
 var
   arr: TgoBsonArray;
@@ -3672,6 +3838,17 @@ begin
   Result := Stage('project', aProjectionDocJS);
 end;
 
+function tgoAggregationPipeline.Project(aProjectionProc: tgoDocEditor): igoAggregationPipeline;
+begin
+  Result := Stage('project', aProjectionProc);
+end;
+
+function tgoAggregationPipeline.Project(aProjectionDoc: tgoBsonDocument): igoAggregationPipeline;
+begin
+  Result := Stage('project', aProjectionDoc);
+end;
+
+
 function tgoAggregationPipeline.AddFields(aNewfieldsDoc: tgoBsonDocument): igoAggregationPipeline;
 begin
   Result := Stage('addFields', aNewfieldsDoc);
@@ -3681,6 +3858,11 @@ function tgoAggregationPipeline.AddFields(aNewfieldsDocJS: string):
     igoAggregationPipeline;
 begin
   Result := Stage('addFields', aNewfieldsDocJS);
+end;
+
+function tgoAggregationPipeline.AddFields(aNewFieldsProc: tgoDocEditor): igoAggregationPipeline;
+begin
+  Result := Stage('addFields', aNewfieldsProc);
 end;
 
 function tgoAggregationPipeline.batchSize(aBatchsize: Integer): igoAggregationPipeline;
@@ -3713,13 +3895,13 @@ begin
   Result := Stage('out', doc);
 end;
 
-function tgoAggregationPipeline.Edit(aEditor: TgoDocCallback):
+function tgoAggregationPipeline.Edit(aEditor: tgoDocEditor):
   igoAggregationPipeline;
 begin
   Result := Edit(fPipeline.Count - 1, aEditor);
 end;
 
-function tgoAggregationPipeline.Edit(aStagenr: Integer; aEditor: TgoDocCallback): igoAggregationPipeline;
+function tgoAggregationPipeline.Edit(aStagenr: Integer; aEditor: tgoDocEditor): igoAggregationPipeline;
 var
   doc: tgoBsonDocument;
 begin
@@ -3737,6 +3919,276 @@ end;
 
 
 {$ENDREGION}
+
+
+  {tgoMongoExpression
+
+   Helper class to build an expression as a Json String and to convert that to a Json document.
+
+   Example:
+
+   WITH tgoMongoExpression do
+     Document['fullname']:=concat([ref('FirstName'),' ',ref('LastName')]);  }
+
+
+
+class function tgoMongoExpression.toLong(const Expr: string): string;
+begin
+  result := format('{ "$toLong": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.toLower(const Expr: string): string;
+begin
+  result := format('{ "$toLower": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.toObjectID(const Expr: string): string;
+begin
+  result := format('{ "$toObjectId": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.toString(const Expr: string): string;
+begin
+  result := format('{ "$toString": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.toUpper(const Expr: string): string;
+begin
+  result := format('{ "$toUpper": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.toUUID(const Expr: string): string;
+begin
+  result := format('{ "$toUUID": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.toBool(const Expr: string): string;
+begin
+  result := format('{ "$toBool": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.toDate(const Expr: string): string;
+begin
+  result := format('{ "$toDate": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.toDecimal(const Expr: string): string;
+begin
+  result := format('{ "$toDecimal": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.toDouble(const Expr: string): string;
+begin
+  result := format('{ "$toDouble": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.toInt(const Expr: string): string;
+begin
+  result := format('{ "$toInt": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.trunc(const Expr: string; const place: string = '0'): string;
+begin
+  result := format('{ "$trunc": [%s, %s] }', [Expr, place]);
+end;
+
+class function tgoMongoExpression.ceil(const Expr: string): string;
+begin
+  result := format('{ "$ceil": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.cmp(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$cmp": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.&array(const Expr: array of string): string;
+var
+  s: string;
+begin
+  result := '[';
+  for s in Expr do
+    result := result + s + ',';
+  setlength(result, length(result) - 1);
+  result := result + ']';
+end;
+
+class function tgoMongoExpression.AsDoc(const json: string): tgoBsonDocument;
+var
+  reader: igojsonreader;
+begin
+  reader := tgojsonreader.create(json, true);
+  result := reader.ReadDocument;
+end;
+
+class function tgoMongoExpression.&and(const Expr: array of string): string;
+begin
+  result := format('{ "$and": %s }', [&array(Expr)]);
+end;
+
+class function tgoMongoExpression.&or(const Expr: array of string): string;
+begin
+  result := format('{ "$or": %s }', [&array(Expr)]);
+end;
+
+class function tgoMongoExpression.concat(const Expr: array of string): string;
+begin
+  result := format('{ "$concat": %s }', [&array(Expr)]);
+end;
+
+class function tgoMongoExpression.floor(const Expr: string): string;
+begin
+  result := format('{ "$floor": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.&const(const ConstantValue: Boolean): string;
+begin
+  if ConstantValue then
+    result := 'true'
+  else
+    result := 'false';
+end;
+
+class function tgoMongoExpression.&const(const ConstantValue: string): string;
+begin
+  result := format('"%s"', [ConstantValue])
+end;
+
+class function tgoMongoExpression.&const(const ConstantValue: int64): string;
+begin
+  result := inttostr(ConstantValue);
+end;
+
+class function tgoMongoExpression.&const(const ConstantValue: Double; Decimals: integer): string;
+begin
+  Str(ConstantValue: 0: Decimals, result);
+end;
+
+class function tgoMongoExpression.ref(const FieldName: string): string;
+begin
+  result := format('"$%s"', [FieldName]);
+end;
+
+class function tgoMongoExpression.multiply(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$multiply": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.add(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$add": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.round(const Expr, place: string): string;
+begin
+  result := format('{ "$round": [%s, %s] }', [Expr, place]);
+end;
+
+class function tgoMongoExpression.split(const Expr, Delimiter: string): string;
+begin
+  result := format('{ "$split": [%s, %s] }', [Expr, Delimiter]);
+end;
+
+class function tgoMongoExpression.substr(const Expr, start, len: string): string;
+begin
+  result := format('{ "$substr": [%s, %s, %s] }', [Expr, start, len]);
+end;
+
+class function tgoMongoExpression.ltrim(const Expr: string; const NumChars: string = ''): string;
+begin
+  if NumChars <> '' then
+    result := format('{ "$ltrim": {input: %s, chars: %s} }', [Expr, NumChars])
+  else
+    result := format('{ "$ltrim": {input: %s} }', [Expr, NumChars])
+end;
+
+class function tgoMongoExpression.rtrim(const Expr: string; const NumChars: string = ''): string;
+begin
+  if NumChars <> '' then
+    result := format('{ "$rtrim": {input: %s, chars: %s} }', [Expr, NumChars])
+  else
+    result := format('{ "$rtrim": {input: %s} }', [Expr, NumChars])
+end;
+
+class function tgoMongoExpression.subtract(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$subtract": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.divide(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$divide": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.eq(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$eq": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.gt(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$gt": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.gte(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$gte": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.lt(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$lt": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.lte(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$lte": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.&not(const Expr: string): string;
+begin
+  result := format('{ "$not": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.first(const Expr: string): string;
+begin
+  result := format('{ "$first": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.last(const Expr: string): string;
+begin
+  result := format('{ "$last": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.avg(const Expr: string): string;
+begin
+  result := format('{ "$avg": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.min(const Expr: string): string;
+begin
+  result := format('{ "$min": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.max(const Expr: string): string;
+begin
+  result := format('{ "$max": %s }', [Expr]);
+end;
+
+
+
+
+class function Aggregate.Expression: tgoMongoExpressionClass;
+begin
+   Result:=tgoMongoExpression;
+end;
+
+class function aggregate.CreatePipeline: igoAggregationPipeline;
+begin
+  Result := tgoAggregationPipeline.Create;
+end;
+
+
 
 end.
 
