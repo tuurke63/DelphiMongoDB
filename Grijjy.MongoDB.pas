@@ -1161,6 +1161,8 @@ tgoMongoExpression = class
     //reference the contents of a field
     class function ref(const FieldName: string): string; static; //reference to a field. fieldname --> "$fieldname"
 
+    class function count(): string; static; // for group stage, counts the documents.
+
     //&Const : pass a string, number or boolean
     class function &const(const ConstantValue: string): string; overload; static; //  string.  John  --> "John".
     class function &const(const ConstantValue: int64): string; overload; static; // integer. 500   --> 500
@@ -4036,6 +4038,11 @@ begin
   result:=result+' } }';
 end;
 
+
+class function tgoMongoExpression.count: string;
+begin
+  result := '{ "$count": { } }';
+end;
 
 class function tgoMongoExpression.toLong(const Expr: string): string;
 begin
