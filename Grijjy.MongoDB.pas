@@ -13,7 +13,6 @@ type
   tgoDocEditor=reference to procedure(doc: tgoBsonDocument);
 
 
-
   { MongoDB validation types
     https://docs.mongodb.com/manual/reference/command/create/ }
   TgoMongoValidationLevel = (vlOff, vlStrict, vlModerate);
@@ -646,7 +645,7 @@ type
 
     Function BatchSize (aBatchsize:Integer):igoAggregationPipeline;
     Function MaxTimeMS (aMS:Integer):igoAggregationPipeline;
-    Function Pipeline:TgoBsonArray;
+    Function Stages:TgoBsonArray;
   end;
 
 
@@ -1109,42 +1108,143 @@ type
   end;
 
 
-tgoMongoExpression = class
-    class function AsDoc(const json: string): tgoBsonDocument; static;
+  (*tgoMongoExpression
 
-    //Field reference
+   Helper class that lets you build a MongoDB AGGREGATE EXPRESSION.
+
+   It maps Mongo functions into Delphi functions and the nested
+   functions will build the Json string.
+
+   The advantage of this is that there are fewer worries about
+   syntax, parentheses, braces and quotes. The code simply won't
+   compile if a mistake was made.
+
+   Also, this is one of the few cases where you might want to use the "WITH"
+   statement and save a lot of typing.
+
+
+   Beware:
+
+     -Expressions that are constant values (strings, numbers, bools) must be passed
+      as &CONST(value)
+
+     -Expressions that are references to field contents must be passed
+      as REF(fieldname)
+
+     "Literals" are an internal MongoDB concept. They represent expressions
+     that must be taken literally and not expanded.
+
+   Example:
+
+   WITH tgoMongoExpression do
+   begin
+      MyDoc ['FullName'] := asBson  (concat( [ ref('FirstName'),  &const(' '), ref('LastName') ]));
+
+      is identical to JSON:    { FullName: { $concat: [ $FirstName, " ", $LastName] } }
+     ...
+   end;
+
+
+
+   The implementation is not yet feature complete.  For example, trigonometry is still missing.
+
+   *)
+
+
+
+tgoMongoExpression = class
+
+    //Converts Json into a Bson Value. The result may be a document, a string, an array ....
+    class function asBson(const json: string): tgoBsonValue; static;
+
+
+    //reference the contents of a field
     class function ref(const FieldName: string): string; static; //reference to a field. fieldname --> "$fieldname"
 
-    //&Const values
+    //&Const : pass a string, number or boolean
     class function &const(const ConstantValue: string): string; overload; static; //  string.  John  --> "John".
     class function &const(const ConstantValue: int64): string; overload; static; // integer. 500   --> 500
     class function &const(const ConstantValue: Boolean): string; overload; static; // boolean. input --> true or false.
     class function &const(const ConstantValue: Double; Decimals: integer): string; overload; static; //Float. pi,4 --> 3.1415
 
+    // see https://www.mongodb.com/docs/v7.0/reference/operator/aggregation/literal/#mongodb-expression-exp.-literal
+    // "literal" means: "do not interpret/expand this expression"
+    class function literal(const Expr: string): string; overload; static;
+
+    //Type determination
+    class function isNumber(const Expr:String):String;
+
+    // see https://www.mongodb.com/docs/v7.0/reference/operator/aggregation/type/#mongodb-expression-exp.-type
+    // missing, string, regex, double, int, long, object, array, date, ObjectId, bool, timestamp,decimal,
+    // null, minKey, maxKey, javascript ....
+    class function &type(const Expr:String):String;
+
     //Conversions
+    class function convert(const input: string;  const &to:String;  const onError: String=''; const onNull: String=''): string; static;
     class function toBool(const Expr: string): string; static; //convert expression to boolean
-    class function toDate(const Expr: string): string; static; //convert expression to date
     class function toString(const Expr: string): string; reintroduce; static; //convert expression to string
     class function toInt(const Expr: string): string; static; //convert expression to int32
     class function toLong(const Expr: string): string; static; //convert expression (date...) to long
     class function toDecimal(const Expr: string): string; static; //convert expression to decimal
     class function toDouble(const Expr: string): string; static; //convert expression to double
-    class function toObjectID(const Expr: string): string; static; //convert expression to objectid
+    class function toObjectId(const Expr: string): string; static; //convert expression to objectid
     class function toLower(const Expr: string): string; static; //convert expression to lower case
     class function toUpper(const Expr: string): string; static; //convert expression to upper case
     class function toUUID(const Expr: string): string; static; //convert expression to UUID
+    class function toDate(const Expr: string): string; static; //convert expression to date
 
-    //Rounding
+    //Rounding of floats
     class function ceil(const Expr: string): string; static; //round a float or decimal up if it isn't an integer
     class function floor(const Expr: string): string; static; //round a float or decimal down if it isn't an integer
     class function round(const Expr: string; const place: string = '0'): string; static; //round a number up or down to "place" decimals
     class function trunc(const Expr: string; const place: string = '0'): string; static; //truncate a float or decimal to "place" decimals
 
+    // Handling of date/time . not feature complete.
+
+    class function dateToString(const DateExpr: string; //UTC! must evaluate to Date, Timestamp or ObjectID
+          const fmt:String='"%Y-%m-%dT%H:%M:%S.%LZ"'; //format of the result
+          const timezone:String=''; //timezone of the result. e.g.  &const('+04:45') or &const('Europe/London').
+          const onNull:String='' //the value to return if date is null. Default is null.
+          ): string; static;
+
+   //new in 5.0
+    class function dateAdd(const StartDate: string; //UTC! must evaluate to Date, Timestamp or ObjectID
+          const &unit:String; //e.g. const('year') , quarter, week, month, day, hour, minute,second,millisecond
+          const amount:String='';    //MUST EVALUATE TO INTEGER OR LONG.  e.g. &const(1).
+          const timezone:String='' //timezone of the result. e.g.  &const('+04:45') or &const('Europe/London').
+          ): string; static;
+
+
+   //new in 5.0
+   class function dateSubtract(const StartDate: string; //UTC! must evaluate to Date, Timestamp or ObjectID
+          const &unit:String; //e.g. const('year') , quarter, week, month, day, hour, minute,second,millisecond
+          const amount:String='';    //MUST EVALUATE TO INTEGER OR LONG.  e.g. &const(1).
+          const timezone:String='' //timezone of the result. e.g.  &const('+04:45') or &const('Europe/London').
+          ): string; static;
+
+    class function millisecond(const DateExpr: string; const timezone:String=''): string; static; //extract the milliseconds of a date (0-999)
+    class function second(const DateExpr: string; const timezone:String=''): string; static; //extract the seconds of a date (0-59)
+    class function minute(const DateExpr: string; const timezone:String=''): string; static; //extract the minutes of a date (0-59)
+    class function hour(const DateExpr: string; const timezone:String=''): string; static; //extract the hours of a date (0-23)
+    class function dayOfMonth(const DateExpr: string; const timezone:String=''): string; static; //extract the day number of the month (1-31) of a date.
+    class function dayOfYear(const DateExpr: string; const timezone:String=''): string; static; //extract the year's day number (1-366) of a date.
+    class function dayOfWeek(const DateExpr: string; const timezone:String=''): string; static; //extract the day number of the week (1=sunday - 7=saturday) of a date.
+    class function week(const DateExpr: string; const timezone:String=''): string; static; //extract the week (0-53) of a date. The first week of a year begins on a sunday.
+    class function month(const DateExpr: string; const timezone:String=''): string; static; //extract the month (1-12) of a date. 1=january
+    class function year(const DateExpr: string; const timezone:String=''): string; static; //extract the year of a date.
+
+    // Note: Isoweek: the week containing the first THURSDAY of a year is week 1 and starts on a MONDAY.
+    class function ISOweek(const DateExpr: string; const timezone:String=''): string; static; //extract the week (1-53) of a date.
+
+    //Note: the ISO year starts on the MONDAY of ISO week 1, so it may even start in the previous year ...
+    class function ISOweekYear(const DateExpr: string; const timezone:String=''): string; static; //extract the Iso Year of a date.
+
     //Basic math
     class function add(const Expr1, Expr2: string): string; static; //add two numbers
-    class function subtract(const Expr1, Expr2: string): string; static; //subtract two numbers
+    class function subtract(const Expr1, Expr2: string): string; static; //subtract two numbers Expr2-Expr1
     class function multiply(const Expr1, Expr2: string): string; static; //multiply two numbers
-    class function divide(const Expr1, Expr2: string): string; static; //divide two numbers
+    class function divide(const Expr1, Expr2: string): string; static; //divide two numbers Expr1/Expr2
+    class function &mod(const Expr1, Expr2: string): string; static; //divide two numbers Expr1/Expr2
 
     //Aggregation
     class function first(const Expr: string): string; static; //Eval expression for first record in a group
@@ -1176,6 +1276,7 @@ tgoMongoExpression = class
     class function &or(const Expr: array of string): string; static;
     class function &not(const Expr: string): string; static;
   end;
+  tgoMongoExpressionClass = class of tgoMongoExpression;
 
 
 
@@ -1184,11 +1285,9 @@ function FindOptions: igoMongoFindOptions; // class factory
 
 
 Type Aggregate=class
-  private
-    type tgoMongoExpressionClass = class of tgoMongoExpression;
   public
-   class function CreatePipeline:igoAggregationPipeline; //class factory
-   class function Expression: tgoMongoExpressionClass;
+   class function CreatePipeline:igoAggregationPipeline; //class factory for fluid interface
+   class function Expression: tgoMongoExpressionClass;   //class factory for fluid interface
 end;
 
 
@@ -2463,7 +2562,7 @@ end;
 
 function TgoMongoCollection.Aggregate(APipeLine : igoAggregationPipeline): igoMongoCursor;
 begin
-  result:=Aggregate(aPipeline.pipeline);
+  result:=Aggregate(aPipeline.Stages);
 end;
 
 
@@ -3656,7 +3755,7 @@ type
   tgoAggregationPipeline = class(TInterfacedObject, igoAggregationPipeline)
   Private
     var
-      fPipeline: TgoBsonArray;
+      fStages: TgoBsonArray;
       fBatchSize: Integer;
       fMaxTimeMS: Integer;
   Public
@@ -3699,20 +3798,20 @@ type
     function Edit(aEditor: tgoDocEditor): igoAggregationPipeline; overload;
     function Edit(aStagenr: Integer; aEditor: tgoDocEditor): igoAggregationPipeline; overload;
 
-    function Pipeline: TgoBsonArray;
+    function Stages: TgoBsonArray;
     constructor Create;
   end;
 
-function tgoAggregationPipeline.Pipeline: TgoBsonArray;
+function tgoAggregationPipeline.Stages: TgoBsonArray;
 begin
-  Result := fPipeline;
+  Result := fStages;
 end;
 
 
 constructor tgoAggregationPipeline.Create;
 begin
   inherited Create;
-  fPipeline := TgoBsonArray.Create;
+  fStages := TgoBsonArray.Create;
 end;
 
 function tgoAggregationPipeline.Stage(const aStageName: string; aStageContent: tgoBsonValue): igoAggregationPipeline;
@@ -3721,7 +3820,7 @@ var
 begin
   doc := tgoBsonDocument.Create;
   doc['$' + aStageName] := aStageContent;
-  fPipeline.add(doc);
+  fStages.add(doc);
   Result := Self;
 end;
 
@@ -3898,7 +3997,7 @@ end;
 function tgoAggregationPipeline.Edit(aEditor: tgoDocEditor):
   igoAggregationPipeline;
 begin
-  Result := Edit(fPipeline.Count - 1, aEditor);
+  Result := Edit(fStages.Count - 1, aEditor);
 end;
 
 function tgoAggregationPipeline.Edit(aStagenr: Integer; aEditor: tgoDocEditor): igoAggregationPipeline;
@@ -3906,9 +4005,9 @@ var
   doc: tgoBsonDocument;
 begin
   Result := Self;
-  if (aStagenr >= 0) and (aStagenr < fPipeline.Count) then
+  if (aStagenr >= 0) and (aStagenr < fStages.Count) then
   begin
-    doc := fPipeline[aStagenr].asBsonDocument;
+    doc := fStages[aStagenr].asBsonDocument;
     if doc.Count >= 1 then
       if doc.Elements[0].Value.IsBsonDocument then //  edit "value" of first field
         aEditor(doc.Elements[0].Value.asBsonDocument);
@@ -3921,15 +4020,21 @@ end;
 {$ENDREGION}
 
 
-  {tgoMongoExpression
 
-   Helper class to build an expression as a Json String and to convert that to a Json document.
 
-   Example:
 
-   WITH tgoMongoExpression do
-     Document['fullname']:=concat([ref('FirstName'),' ',ref('LastName')]);  }
+class function tgoMongoExpression.convert(const input, &to, onError, onNull: String): string;
+begin
+  result:=format ('{ "$convert": { input: %s , to: %s',[input, &to]);
 
+  if onError<>'' then
+    result:=result + format(' , onError: %s',[onError]);
+
+  if onNull<>'' then
+    result:=result + format(' , onNull: %s',[onNull]);
+
+  result:=result+' } }';
+end;
 
 
 class function tgoMongoExpression.toLong(const Expr: string): string;
@@ -3942,7 +4047,7 @@ begin
   result := format('{ "$toLower": %s }', [Expr]);
 end;
 
-class function tgoMongoExpression.toObjectID(const Expr: string): string;
+class function tgoMongoExpression.toObjectId(const Expr: string): string;
 begin
   result := format('{ "$toObjectId": %s }', [Expr]);
 end;
@@ -3992,6 +4097,122 @@ begin
   result := format('{ "$trunc": [%s, %s] }', [Expr, place]);
 end;
 
+
+function TzExpr (const DateExpr: string; const timezone:String=''):String;
+begin
+  if timezone=''
+  then result:=format ('{ date: %s}',[DateExpr])
+  else result:=format ('{ date: %s , timezone: %s }',[DateExpr, timezone]);
+end;
+
+
+class function tgoMongoExpression.millisecond(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$millisecond": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.second(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$second": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.minute(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$minute": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.hour(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$hour": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.IsNumber(const Expr: String): String;
+begin
+  result := format('{ "$isNumber": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.&type(const Expr:String):String;
+begin
+result := format('{ "$type": %s }', [Expr]);
+end;
+
+class function tgoMongoExpression.ISOweek(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$isoWeek": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.ISOweekYear(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$isoWeekYear": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.week(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$week": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.month(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$month": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.year(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$year": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.dayOfYear(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$dayOfYear": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.dayOfMonth(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$dayOfMonth": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+class function tgoMongoExpression.dayOfWeek(const DateExpr: string; const timezone:String=''): string;
+begin
+  result := format('{ "$dayOfWeek": %s }', [tzexpr(DateExpr, timezone)]);
+end;
+
+
+function DateAddExpr (const startDate, &unit, amount: String; const timezone:String=''):String;
+begin
+  result:=format ('{ startDate: %s , unit: %s , amount: %s',[startDate, &unit, amount]);
+  if timezone<>'' then
+    result:=result + format(' , timezone: %s',[timezone]);
+  result:=result+' }';
+end;
+
+
+class function tgoMongoExpression.dateToString(const DateExpr, fmt, timezone, onNull: String): string;
+begin
+  result := format('{ "$dateToString": { date: %s', [DateExpr]);
+
+  if fmt<>'' then
+    result:=result + format(' , format: %s',[fmt]);
+
+  if timezone<>'' then
+    result:=result + format(' , timezone: %s',[timezone]);
+
+  if onNull<>'' then
+    result:=result + format(' , onNull: %s',[onNull]);
+
+  result:=result+' } }';
+end;
+
+
+class function tgoMongoExpression.dateAdd(const StartDate, &unit, &amount, timezone: String): string;
+begin
+  result := format('{ "$dateAdd": %s }', [dateaddexpr(StartDate, &unit, amount, timezone)]);
+end;
+
+class function tgoMongoExpression.dateSubtract(const StartDate, &unit, amount, timezone: String): string;
+begin
+  result := format('{ "$dateSubtract": %s }', [dateaddexpr(StartDate, &unit, amount, timezone)]);
+end;
+
 class function tgoMongoExpression.ceil(const Expr: string): string;
 begin
   result := format('{ "$ceil": %s }', [Expr]);
@@ -4013,12 +4234,12 @@ begin
   result := result + ']';
 end;
 
-class function tgoMongoExpression.AsDoc(const json: string): tgoBsonDocument;
+class function tgoMongoExpression.asBson(const json: string): tgoBsonValue;
 var
   reader: igojsonreader;
 begin
   reader := tgojsonreader.create(json, true);
-  result := reader.ReadDocument;
+  result := reader.ReadValue;
 end;
 
 class function tgoMongoExpression.&and(const Expr: array of string): string;
@@ -4064,6 +4285,7 @@ begin
   Str(ConstantValue: 0: Decimals, result);
 end;
 
+
 class function tgoMongoExpression.ref(const FieldName: string): string;
 begin
   result := format('"$%s"', [FieldName]);
@@ -4083,6 +4305,7 @@ class function tgoMongoExpression.round(const Expr, place: string): string;
 begin
   result := format('{ "$round": [%s, %s] }', [Expr, place]);
 end;
+
 
 class function tgoMongoExpression.split(const Expr, Delimiter: string): string;
 begin
@@ -4115,9 +4338,15 @@ begin
   result := format('{ "$subtract": [%s, %s] }', [Expr1, Expr2]);
 end;
 
+
 class function tgoMongoExpression.divide(const Expr1, Expr2: string): string;
 begin
   result := format('{ "$divide": [%s, %s] }', [Expr1, Expr2]);
+end;
+
+class function tgoMongoExpression.&mod(const Expr1, Expr2: string): string;
+begin
+  result := format('{ "$mod": [%s, %s] }', [Expr1, Expr2]);
 end;
 
 class function tgoMongoExpression.eq(const Expr1, Expr2: string): string;
@@ -4134,6 +4363,7 @@ class function tgoMongoExpression.gte(const Expr1, Expr2: string): string;
 begin
   result := format('{ "$gte": [%s, %s] }', [Expr1, Expr2]);
 end;
+
 
 class function tgoMongoExpression.lt(const Expr1, Expr2: string): string;
 begin
@@ -4160,15 +4390,23 @@ begin
   result := format('{ "$last": %s }', [Expr]);
 end;
 
+class function tgoMongoExpression.literal(const Expr: string): string;
+begin
+  result := format('{ "$literal": %s }', [Expr]);
+end;
+
 class function tgoMongoExpression.avg(const Expr: string): string;
 begin
   result := format('{ "$avg": %s }', [Expr]);
 end;
 
+
 class function tgoMongoExpression.min(const Expr: string): string;
 begin
   result := format('{ "$min": %s }', [Expr]);
 end;
+
+
 
 class function tgoMongoExpression.max(const Expr: string): string;
 begin
@@ -4180,6 +4418,9 @@ end;
 
 class function Aggregate.Expression: tgoMongoExpressionClass;
 begin
+   {Not a "real" class factory, just returns a class type.
+   Since all methods are static class methods, that's quite OK.}
+
    Result:=tgoMongoExpression;
 end;
 
