@@ -1196,10 +1196,25 @@ tgoMongoExpression = class
     class function toDate(const Expr: string): string; static; //convert expression to date
 
     //Rounding of floats
+    class function abs(const Expr: string): string; static; //calculate the absolute value of a number.
     class function ceil(const Expr: string): string; static; //round a float or decimal up if it isn't an integer
     class function floor(const Expr: string): string; static; //round a float or decimal down if it isn't an integer
     class function round(const Expr: string; const place: string = '0'): string; static; //round a number up or down to "place" decimals
     class function trunc(const Expr: string; const place: string = '0'): string; static; //truncate a float or decimal to "place" decimals
+
+
+    //math functions
+    class function exp(const Expr: string): string; static; //calculate e^x
+    class function ln(const Expr: string): string; static; // calculate natural logarithm
+    class function log(const Expr1, Expr2: string): string; static; // calculate logarithm for any positive vase
+    class function log10(const Expr: string): string; static; // calculate 10log(x)
+    class function pow(const Expr1, Expr2: string): string; static; // calculate a^b
+    class function sqrt(const Expr: string): string; static; //calculate square root
+
+
+    //Bit operations (new in 6.3)
+
+
 
     // Handling of date/time . not feature complete.
 
@@ -1267,16 +1282,32 @@ tgoMongoExpression = class
     class function cmp(const Expr1, Expr2: string): string; static; //compare two numbers, return an integer
 
     //Comparison with boolean result
-    class function &eq(const Expr1, Expr2: string): string; static;
-    class function gt(const Expr1, Expr2: string): string; static;
-    class function gte(const Expr1, Expr2: string): string; static;
-    class function lt(const Expr1, Expr2: string): string; static;
-    class function lte(const Expr1, Expr2: string): string; static;
+    class function &eq(const Expr1, Expr2: string): string; static;     //Result= (a=b)
+    class function gt(const Expr1, Expr2: string): string; static;      //Result= (a>b)
+    class function gte(const Expr1, Expr2: string): string; static;     //Result= (a>=b)
+    class function lt(const Expr1, Expr2: string): string; static;      //Result= (a<b)
+    class function lte(const Expr1, Expr2: string): string; static;     //Result= (a<=b)
 
-    //operators with boolean result
-    class function &and(const Expr: array of string): string; static;
-    class function &or(const Expr: array of string): string; static;
-    class function &not(const Expr: string): string; static;
+    //boolean operators
+    class function &and(const Expr: array of string): string; static; //true if logical AND of all elements is true.
+    class function &or(const Expr: array of string): string; static;  //true if any element is true
+    class function &not(const Expr: string): string; static;          //negates one boolean expression
+
+    //boolean comparison with result of any type
+    class function cond(const aIf, aThen, aElse: string): string; static; //if aIf is true, it returns aThen, else aElse.
+
+    //Bitwise operators, new in 6.3
+    class function bitAnd(const Expr: array of string): string; static;
+    class function bitOr(const Expr: array of string): string; static;
+    class function bitXor(const Expr: array of string): string; static;
+    class function bitNot(const Expr1: string): string; static;
+
+    //Array functions
+    class function arrayElementAt(const Expr1: array of string; const Expr2:String): string; static; //lookup
+    class function &in (const Expr1:String; const Expr2: array of string): string; static; //lookup with boolean result
+    class function ifNull (const Expr: array of string): string; static; //returns the first item of the expression that is not null.
+
+
   end;
   tgoMongoExpressionClass = class of tgoMongoExpression;
 
@@ -3604,9 +3635,6 @@ end;
 
 {$ENDREGION}
 //
-
-
-//
 {$REGION 'tgoConnectionPool - a connection pool for multithreaded applications.'}
 
 constructor tgoConnectionPool.Create(const aHost: string; aPort: Integer; const aSettings: tgoMongoClientSettings; aMaxitems: integer);
@@ -3750,7 +3778,7 @@ begin
 end;
 
 {$ENDREGION}
-
+//
 {$REGION 'igoAggregationPipeline - a fluent aggregation pipeline builder'}
 
 type
@@ -4016,413 +4044,469 @@ begin
   end;
 end;
 
-
-
-
 {$ENDREGION}
-
-
-
-
-
-class function tgoMongoExpression.convert(const input, &to, onError, onNull: String): string;
-begin
-  result:=format ('{ "$convert": { input: %s , to: %s',[input, &to]);
-
-  if onError<>'' then
-    result:=result + format(' , onError: %s',[onError]);
-
-  if onNull<>'' then
-    result:=result + format(' , onNull: %s',[onNull]);
-
-  result:=result+' } }';
-end;
-
-
-class function tgoMongoExpression.count: string;
-begin
-  result := '{ "$count": { } }';
-end;
-
-class function tgoMongoExpression.toLong(const Expr: string): string;
-begin
-  result := format('{ "$toLong": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.toLower(const Expr: string): string;
-begin
-  result := format('{ "$toLower": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.toObjectId(const Expr: string): string;
-begin
-  result := format('{ "$toObjectId": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.toString(const Expr: string): string;
-begin
-  result := format('{ "$toString": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.toUpper(const Expr: string): string;
-begin
-  result := format('{ "$toUpper": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.toUUID(const Expr: string): string;
-begin
-  result := format('{ "$toUUID": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.toBool(const Expr: string): string;
-begin
-  result := format('{ "$toBool": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.toDate(const Expr: string): string;
-begin
-  result := format('{ "$toDate": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.toDecimal(const Expr: string): string;
-begin
-  result := format('{ "$toDecimal": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.toDouble(const Expr: string): string;
-begin
-  result := format('{ "$toDouble": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.toInt(const Expr: string): string;
-begin
-  result := format('{ "$toInt": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.trunc(const Expr: string; const place: string = '0'): string;
-begin
-  result := format('{ "$trunc": [%s, %s] }', [Expr, place]);
-end;
-
-
-function TzExpr (const DateExpr: string; const timezone:String=''):String;
-begin
-  if timezone=''
-  then result:=format ('{ date: %s}',[DateExpr])
-  else result:=format ('{ date: %s , timezone: %s }',[DateExpr, timezone]);
-end;
-
-
-class function tgoMongoExpression.millisecond(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$millisecond": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.second(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$second": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.minute(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$minute": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.hour(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$hour": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.IsNumber(const Expr: String): String;
-begin
-  result := format('{ "$isNumber": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.&type(const Expr:String):String;
-begin
-result := format('{ "$type": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.ISOweek(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$isoWeek": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.ISOweekYear(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$isoWeekYear": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.week(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$week": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.month(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$month": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.year(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$year": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.dayOfYear(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$dayOfYear": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.dayOfMonth(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$dayOfMonth": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-class function tgoMongoExpression.dayOfWeek(const DateExpr: string; const timezone:String=''): string;
-begin
-  result := format('{ "$dayOfWeek": %s }', [tzexpr(DateExpr, timezone)]);
-end;
-
-
-function DateAddExpr (const startDate, &unit, amount: String; const timezone:String=''):String;
-begin
-  result:=format ('{ startDate: %s , unit: %s , amount: %s',[startDate, &unit, amount]);
-  if timezone<>'' then
-    result:=result + format(' , timezone: %s',[timezone]);
-  result:=result+' }';
-end;
-
-
-class function tgoMongoExpression.dateToString(const DateExpr, fmt, timezone, onNull: String): string;
-begin
-  result := format('{ "$dateToString": { date: %s', [DateExpr]);
-
-  if fmt<>'' then
-    result:=result + format(' , format: %s',[fmt]);
-
-  if timezone<>'' then
-    result:=result + format(' , timezone: %s',[timezone]);
-
-  if onNull<>'' then
-    result:=result + format(' , onNull: %s',[onNull]);
-
-  result:=result+' } }';
-end;
-
-
-class function tgoMongoExpression.dateAdd(const StartDate, &unit, &amount, timezone: String): string;
-begin
-  result := format('{ "$dateAdd": %s }', [dateaddexpr(StartDate, &unit, amount, timezone)]);
-end;
-
-class function tgoMongoExpression.dateSubtract(const StartDate, &unit, amount, timezone: String): string;
-begin
-  result := format('{ "$dateSubtract": %s }', [dateaddexpr(StartDate, &unit, amount, timezone)]);
-end;
-
-class function tgoMongoExpression.ceil(const Expr: string): string;
-begin
-  result := format('{ "$ceil": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.cmp(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$cmp": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-class function tgoMongoExpression.&array(const Expr: array of string): string;
-var
-  s: string;
-begin
-  result := '[';
-  for s in Expr do
-    result := result + s + ',';
-  setlength(result, length(result) - 1);
-  result := result + ']';
-end;
-
-class function tgoMongoExpression.asBson(const json: string): tgoBsonValue;
-var
-  reader: igojsonreader;
-begin
-  reader := tgojsonreader.create(json, true);
-  result := reader.ReadValue;
-end;
-
-class function tgoMongoExpression.&and(const Expr: array of string): string;
-begin
-  result := format('{ "$and": %s }', [&array(Expr)]);
-end;
-
-class function tgoMongoExpression.&or(const Expr: array of string): string;
-begin
-  result := format('{ "$or": %s }', [&array(Expr)]);
-end;
-
-class function tgoMongoExpression.concat(const Expr: array of string): string;
-begin
-  result := format('{ "$concat": %s }', [&array(Expr)]);
-end;
-
-class function tgoMongoExpression.floor(const Expr: string): string;
-begin
-  result := format('{ "$floor": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.&const(const ConstantValue: Boolean): string;
-begin
-  if ConstantValue then
-    result := 'true'
-  else
-    result := 'false';
-end;
-
-class function tgoMongoExpression.&const(const ConstantValue: string): string;
-begin
-  result := format('"%s"', [ConstantValue])
-end;
-
-class function tgoMongoExpression.&const(const ConstantValue: int64): string;
-begin
-  result := inttostr(ConstantValue);
-end;
-
-class function tgoMongoExpression.&const(const ConstantValue: Double; Decimals: integer): string;
-begin
-  Str(ConstantValue: 0: Decimals, result);
-end;
-
-
-class function tgoMongoExpression.ref(const FieldName: string): string;
-begin
-  result := format('"$%s"', [FieldName]);
-end;
-
-class function tgoMongoExpression.multiply(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$multiply": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-class function tgoMongoExpression.add(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$add": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-class function tgoMongoExpression.round(const Expr, place: string): string;
-begin
-  result := format('{ "$round": [%s, %s] }', [Expr, place]);
-end;
-
-
-class function tgoMongoExpression.split(const Expr, Delimiter: string): string;
-begin
-  result := format('{ "$split": [%s, %s] }', [Expr, Delimiter]);
-end;
-
-class function tgoMongoExpression.substr(const Expr, start, len: string): string;
-begin
-  result := format('{ "$substr": [%s, %s, %s] }', [Expr, start, len]);
-end;
-
-class function tgoMongoExpression.ltrim(const Expr: string; const NumChars: string = ''): string;
-begin
-  if NumChars <> '' then
-    result := format('{ "$ltrim": {input: %s, chars: %s} }', [Expr, NumChars])
-  else
-    result := format('{ "$ltrim": {input: %s} }', [Expr, NumChars])
-end;
-
-class function tgoMongoExpression.rtrim(const Expr: string; const NumChars: string = ''): string;
-begin
-  if NumChars <> '' then
-    result := format('{ "$rtrim": {input: %s, chars: %s} }', [Expr, NumChars])
-  else
-    result := format('{ "$rtrim": {input: %s} }', [Expr, NumChars])
-end;
-
-class function tgoMongoExpression.subtract(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$subtract": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-
-class function tgoMongoExpression.divide(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$divide": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-class function tgoMongoExpression.&mod(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$mod": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-class function tgoMongoExpression.eq(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$eq": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-class function tgoMongoExpression.gt(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$gt": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-class function tgoMongoExpression.gte(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$gte": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-
-class function tgoMongoExpression.lt(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$lt": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-class function tgoMongoExpression.lte(const Expr1, Expr2: string): string;
-begin
-  result := format('{ "$lte": [%s, %s] }', [Expr1, Expr2]);
-end;
-
-class function tgoMongoExpression.&not(const Expr: string): string;
-begin
-  result := format('{ "$not": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.first(const Expr: string): string;
-begin
-  result := format('{ "$first": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.last(const Expr: string): string;
-begin
-  result := format('{ "$last": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.literal(const Expr: string): string;
-begin
-  result := format('{ "$literal": %s }', [Expr]);
-end;
-
-class function tgoMongoExpression.avg(const Expr: string): string;
-begin
-  result := format('{ "$avg": %s }', [Expr]);
-end;
-
-
-class function tgoMongoExpression.min(const Expr: string): string;
-begin
-  result := format('{ "$min": %s }', [Expr]);
-end;
-
-
-
-class function tgoMongoExpression.max(const Expr: string): string;
-begin
-  result := format('{ "$max": %s }', [Expr]);
-end;
-
-
-
-
+//
+{$REGION 'tgoMongoExpression'}
+
+
+  class function tgoMongoExpression.convert(const input, &to, onError, onNull: String): string;
+  begin
+    result:=format ('{ "$convert": { input: %s , to: %s',[input, &to]);
+
+    if onError<>'' then
+      result:=result + format(' , onError: %s',[onError]);
+
+    if onNull<>'' then
+      result:=result + format(' , onNull: %s',[onNull]);
+
+    result:=result+' } }';
+  end;
+
+  class function tgoMongoExpression.count: string;
+  begin
+    result := '{ "$count": { } }';
+  end;
+
+  class function tgoMongoExpression.toLong(const Expr: string): string;
+  begin
+    result := format('{ "$toLong": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.toLower(const Expr: string): string;
+  begin
+    result := format('{ "$toLower": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.toObjectId(const Expr: string): string;
+  begin
+    result := format('{ "$toObjectId": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.toString(const Expr: string): string;
+  begin
+    result := format('{ "$toString": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.toUpper(const Expr: string): string;
+  begin
+    result := format('{ "$toUpper": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.toUUID(const Expr: string): string;
+  begin
+    result := format('{ "$toUUID": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.toBool(const Expr: string): string;
+  begin
+    result := format('{ "$toBool": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.toDate(const Expr: string): string;
+  begin
+    result := format('{ "$toDate": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.toDecimal(const Expr: string): string;
+  begin
+    result := format('{ "$toDecimal": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.toDouble(const Expr: string): string;
+  begin
+    result := format('{ "$toDouble": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.toInt(const Expr: string): string;
+  begin
+    result := format('{ "$toInt": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.trunc(const Expr: string; const place: string = '0'): string;
+  begin
+    result := format('{ "$trunc": [%s, %s] }', [Expr, place]);
+  end;
+
+  function TzExpr (const DateExpr: string; const timezone:String=''):String;
+  begin
+    if timezone=''
+    then result:=format ('{ date: %s}',[DateExpr])
+    else result:=format ('{ date: %s , timezone: %s }',[DateExpr, timezone]);
+  end;
+
+  class function tgoMongoExpression.millisecond(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$millisecond": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.second(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$second": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.minute(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$minute": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.hour(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$hour": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.IsNumber(const Expr: String): String;
+  begin
+    result := format('{ "$isNumber": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.&type(const Expr:String):String;
+  begin
+  result := format('{ "$type": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.ISOweek(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$isoWeek": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.ISOweekYear(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$isoWeekYear": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.week(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$week": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.month(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$month": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.year(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$year": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.dayOfYear(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$dayOfYear": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.dayOfMonth(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$dayOfMonth": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  class function tgoMongoExpression.dayOfWeek(const DateExpr: string; const timezone:String=''): string;
+  begin
+    result := format('{ "$dayOfWeek": %s }', [tzexpr(DateExpr, timezone)]);
+  end;
+
+  function DateAddExpr (const startDate, &unit, amount: String; const timezone:String=''):String;
+  begin
+    result:=format ('{ startDate: %s , unit: %s , amount: %s',[startDate, &unit, amount]);
+    if timezone<>'' then
+      result:=result + format(' , timezone: %s',[timezone]);
+    result:=result+' }';
+  end;
+
+  class function tgoMongoExpression.dateToString(const DateExpr, fmt, timezone, onNull: String): string;
+  begin
+    result := format('{ "$dateToString": { date: %s', [DateExpr]);
+
+    if fmt<>'' then
+      result:=result + format(' , format: %s',[fmt]);
+
+    if timezone<>'' then
+      result:=result + format(' , timezone: %s',[timezone]);
+
+    if onNull<>'' then
+      result:=result + format(' , onNull: %s',[onNull]);
+
+    result:=result+' } }';
+  end;
+
+  class function tgoMongoExpression.dateAdd(const StartDate, &unit, &amount, timezone: String): string;
+  begin
+    result := format('{ "$dateAdd": %s }', [dateaddexpr(StartDate, &unit, amount, timezone)]);
+  end;
+
+  class function tgoMongoExpression.dateSubtract(const StartDate, &unit, amount, timezone: String): string;
+  begin
+    result := format('{ "$dateSubtract": %s }', [dateaddexpr(StartDate, &unit, amount, timezone)]);
+  end;
+
+  class function tgoMongoExpression.ceil(const Expr: string): string;
+  begin
+    result := format('{ "$ceil": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.cmp(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$cmp": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.log(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$log": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.pow(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$pow": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.&array(const Expr: array of string): string;
+  var
+    s: string;
+  begin
+    result := '[';
+    for s in Expr do
+      result := result + s + ',';
+    setlength(result, length(result) - 1);
+    result := result + ']';
+  end;
+
+  class function tgoMongoExpression.asBson(const json: string): tgoBsonValue;
+  var
+    reader: igojsonreader;
+  begin
+    reader := tgojsonreader.create(json, true);
+    result := reader.ReadValue;
+  end;
+
+  class function tgoMongoExpression.&and(const Expr: array of string): string;
+  begin
+    result := format('{ "$and": %s }', [&array(Expr)]);
+  end;
+
+  class function tgoMongoExpression.&or(const Expr: array of string): string;
+  begin
+    result := format('{ "$or": %s }', [&array(Expr)]);
+  end;
+
+  class function tgoMongoExpression.concat(const Expr: array of string): string;
+  begin
+    result := format('{ "$concat": %s }', [&array(Expr)]);
+  end;
+
+  class function tgoMongoExpression.cond(const aIf, aThen, aElse: string): string;
+  begin
+    result := format('{ "$cond": { if: %s , then: %s , else: %s } }', [aIf, aThen, aElse]);
+  end;
+
+  class function tgoMongoExpression.bitAnd(const Expr: array of string): string;
+  begin
+    result := format('{ "$bitAnd": %s }', [&array(Expr)]);
+  end;
+
+  class function tgoMongoExpression.bitNot(const Expr1: string): string;
+  begin
+    result := format('{ "$bitNot": %s }', [Expr1]);
+  end;
+
+  class function tgoMongoExpression.bitOr(const Expr: array of string): string;
+  begin
+    result := format('{ "$bitOr": %s }', [&array(Expr)]);
+  end;
+
+  class function tgoMongoExpression.bitXor(const Expr: array of string): string;
+  begin
+    result := format('{ "$bitXor": %s }', [&array(Expr)]);
+  end;
+
+  class function tgoMongoExpression.arrayElementAt(const Expr1: array of string; const Expr2: String): string;
+  begin
+   result := format('{ "$arrayElementAt": [%s , %s]}', [&array(Expr1), Expr2]);
+  end;
+
+  class function tgoMongoExpression.ifNull(const Expr: array of string): string;
+  begin
+    result := format('{ "$ifNull": %s }', [&array(Expr)]);
+  end;
+
+  class function tgoMongoExpression.&in(const Expr1: String; const Expr2: array of string): string;
+  begin
+   result := format('{ "$in": [%s , %s]}', [Expr1 ,  &array(Expr2)]);
+  end;
+
+  class function tgoMongoExpression.floor(const Expr: string): string;
+  begin
+    result := format('{ "$floor": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.&const(const ConstantValue: Boolean): string;
+  begin
+    if ConstantValue then
+      result := 'true'
+    else
+      result := 'false';
+  end;
+
+  class function tgoMongoExpression.&const(const ConstantValue: string): string;
+  begin
+    result := format('"%s"', [ConstantValue])
+  end;
+
+  class function tgoMongoExpression.&const(const ConstantValue: int64): string;
+  begin
+    result := inttostr(ConstantValue);
+  end;
+
+  class function tgoMongoExpression.&const(const ConstantValue: Double; Decimals: integer): string;
+  begin
+    Str(ConstantValue: 0: Decimals, result);
+  end;
+
+  class function tgoMongoExpression.ref(const FieldName: string): string;
+  begin
+    result := format('"$%s"', [FieldName]);
+  end;
+
+  class function tgoMongoExpression.multiply(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$multiply": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.add(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$add": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.round(const Expr, place: string): string;
+  begin
+    result := format('{ "$round": [%s, %s] }', [Expr, place]);
+  end;
+
+  class function tgoMongoExpression.split(const Expr, Delimiter: string): string;
+  begin
+    result := format('{ "$split": [%s, %s] }', [Expr, Delimiter]);
+  end;
+
+  class function tgoMongoExpression.substr(const Expr, start, len: string): string;
+  begin
+    result := format('{ "$substr": [%s, %s, %s] }', [Expr, start, len]);
+  end;
+
+  class function tgoMongoExpression.ltrim(const Expr: string; const NumChars: string = ''): string;
+  begin
+    if NumChars <> '' then
+      result := format('{ "$ltrim": {input: %s, chars: %s} }', [Expr, NumChars])
+    else
+      result := format('{ "$ltrim": {input: %s} }', [Expr, NumChars])
+  end;
+
+  class function tgoMongoExpression.rtrim(const Expr: string; const NumChars: string = ''): string;
+  begin
+    if NumChars <> '' then
+      result := format('{ "$rtrim": {input: %s, chars: %s} }', [Expr, NumChars])
+    else
+      result := format('{ "$rtrim": {input: %s} }', [Expr, NumChars])
+  end;
+
+  class function tgoMongoExpression.subtract(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$subtract": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.divide(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$divide": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.&mod(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$mod": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.eq(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$eq": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.gt(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$gt": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.gte(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$gte": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.lt(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$lt": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.lte(const Expr1, Expr2: string): string;
+  begin
+    result := format('{ "$lte": [%s, %s] }', [Expr1, Expr2]);
+  end;
+
+  class function tgoMongoExpression.&not(const Expr: string): string;
+  begin
+    result := format('{ "$not": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.first(const Expr: string): string;
+  begin
+    result := format('{ "$first": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.last(const Expr: string): string;
+  begin
+    result := format('{ "$last": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.literal(const Expr: string): string;
+  begin
+    result := format('{ "$literal": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.avg(const Expr: string): string;
+  begin
+    result := format('{ "$avg": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.min(const Expr: string): string;
+  begin
+    result := format('{ "$min": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.max(const Expr: string): string;
+  begin
+    result := format('{ "$max": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.abs(const Expr: string): string;
+  begin
+    result := format('{ "$abs": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.exp(const Expr: string): string;
+  begin
+    result := format('{ "$exp": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.ln(const Expr: string): string;
+  begin
+    result := format('{ "$ln": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.log10(const Expr: string): string;
+  begin
+    result := format('{ "$log10": %s }', [Expr]);
+  end;
+
+  class function tgoMongoExpression.sqrt(const Expr: string): string;
+  begin
+    result := format('{ "$sqrt": %s }', [Expr]);
+  end;
+{$ENDREGION}
+//
 class function Aggregate.Expression: tgoMongoExpressionClass;
 begin
    {Not a "real" class factory, just returns a class type.
