@@ -295,6 +295,7 @@ type
       AName: The name of the database to drop. }
     procedure DropDatabase(const AName: string);
     function getAvailable: Boolean;
+    function getConnected: Boolean;
     { Gets a database.
 
       Parameters:
@@ -313,9 +314,11 @@ type
     function getPooled: Boolean;
     procedure ReleaseToPool;
     procedure setAvailable(const Value: Boolean);
+    procedure setConnected(const Value: Boolean);
     procedure SetGlobalReadPreference(const Value: tgoMongoReadPreference);
     procedure setPooled(const Value: Boolean);
     property Available: Boolean read getAvailable write setAvailable;
+    property Connected: Boolean read getConnected write setConnected;
     { GlobalReadPreference sets the global ReadPreference for all objects (database, collection etc)
       that do not have an individual specific ReadPreference. }
     property GlobalReadPreference: tgoMongoReadPreference read GetGlobalReadPreference write SetGlobalReadPreference;
@@ -1019,7 +1022,10 @@ type
     function BuildInfo: TgoBsonDocument;
     function HostInfo: TgoBsonDocument;
     function Features: TgoBsonDocument;
+    function getConnected: Boolean;
+    procedure setConnected(const Value: Boolean);    
     procedure ReleaseToPool;
+    
   protected
 
 {$ENDREGION 'Internal Declarations'}
@@ -1045,6 +1051,7 @@ type
     property GlobalReadPreference: tgoMongoReadPreference read GetGlobalReadPreference write SetGlobalReadPreference;
     property Pooled: Boolean read getPooled write setPooled;   //Client is inside a connection pool
     property Available: Boolean read getAvailable write setAvailable; //Client is available (not in use)
+    property Connected: Boolean read getConnected write setConnected;
     property Protocol: TgoMongoProtocol read GetProtocol;
   end;
 
@@ -1064,6 +1071,7 @@ type
     function getHost: string;
     function getPort: Integer;
     function GetAvailableClient: igoMongoClient; //grabs an available client connection from the pool.
+    procedure Remove(Client: igoMongoClient);
     procedure ReleaseToPool(const Client: igoMongoClient); //Releases the connection back to the pool
     procedure ClearAll; //Removes ALL connections;
     procedure Purge; //Deletes currently unused connections
@@ -1087,6 +1095,7 @@ type
     destructor Destroy; override;
     function GetAvailableClient: igoMongoClient; //grabs an available client connection from the pool.
     procedure ReleaseToPool(const Client: igoMongoClient);//Releases the connection back to the pool
+    procedure Remove(Client: igoMongoClient);
     procedure ClearAll;
     procedure Purge; //Deletes currently unused connections
     property ConnectionSettings: tgoMongoClientSettings read getConnectionSettings;
@@ -1346,15 +1355,9 @@ const
 
 
 
-{ If no reply was received within timeout seconds, throw an exception }
-procedure HandleTimeout(const AReply: IgoMongoReply); inline;
-begin
-  if (AReply = nil) then
-    raise EgoMongoDBConnectionError.Create(RS_MONGODB_CONNECTION_ERROR);
-end;
 
 { If timeout, or error message, throw exception }
-function HandleCommandReply(const AReply: IgoMongoReply; const AErrorToIgnore: TgoMongoErrorCode = TgoMongoErrorCode.OK): Integer;
+function HandleCommandReply(aProtocol:TgoMongoProtocol; const AReply: IgoMongoReply; const AErrorToIgnore: TgoMongoErrorCode = TgoMongoErrorCode.OK): Integer;
 var
   Doc, ErrorDoc: TgoBsonDocument;
   Value: TgoBsonValue;
@@ -1373,7 +1376,11 @@ var
       end ;
 
 begin
-  HandleTimeout(AReply); { Exception if timeout }
+  if (AReply = nil) then  { usually means timeout }
+  begin
+    aProtocol.Connected:=False;
+    aProtocol.ConnectionFailedException (RS_MONGODB_CONNECTION_ERROR);
+  end;
 
   Doc := AReply.FirstDoc;
   if Doc.IsNil then
@@ -1840,6 +1847,7 @@ begin
       SpecifyReadPreference(Writer);
       Writer.WriteEndDocument;
       Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, fprotocol.ReplyTimeout);
+      HandleCommandReply(fProtocol,Reply);   //TEST , added 9.1.2025
     except
         // always ignore exceptions in a destructor!
     end;
@@ -1886,8 +1894,7 @@ begin
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
   Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, fprotocol.ReplyTimeout);
-//  HandleTimeout(Reply);
-  HandleCommandReply(Reply);   //TEST
+  HandleCommandReply(fProtocol,Reply);
 
   FIndex := 0;
   SetLength(FPage, 0);
@@ -1992,7 +1999,7 @@ begin
  { TODO : Readpreference??? }
   Writer.WriteEndDocument;
   Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  HandleCommandReply(Reply);
+  HandleCommandReply(fProtocol, Reply);
 end;
 
 function TgoMongoClient.GetDatabase(const AName: string): IgoMongoDatabase;
@@ -2029,7 +2036,7 @@ begin
   { TODO : Readpreference??? }
   Writer.WriteEndDocument;
   Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  HandleCommandReply(Reply);
+  HandleCommandReply(fProtocol, Reply);
   Doc := Reply.FirstDoc;
   if not Doc.IsNil then
   begin
@@ -2064,7 +2071,7 @@ begin
   end;
   Writer.WriteEndDocument;
   Reply := FProtocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  HandleCommandReply(Reply);
+  HandleCommandReply(fProtocol, Reply);
 
   Doc := Reply.FirstDoc;
   if not (Doc.IsNil) then
@@ -2129,7 +2136,7 @@ begin
   Writer.WriteString('$db', DB_ADMIN);
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  HandleCommandReply(Reply);
+  HandleCommandReply(fProtocol, Reply);
   with tgoCursorHelper do
     Result := CreateCursor(Reply.FirstDoc, FProtocol, FProtocol.GlobalReadPreference);
 end;
@@ -2165,6 +2172,11 @@ begin
   Result := fAvailable;
 end;
 
+function TgoMongoClient.getConnected: Boolean;
+begin
+  Result := fProtocol.Connected;
+end;
+
 function TgoMongoClient.GetGlobalReadPreference: tgoMongoReadPreference;
 begin
   Result := FProtocol.GlobalReadPreference;
@@ -2174,23 +2186,6 @@ function TgoMongoClient.getPooled: Boolean;
 begin
   Result := fPooled;
 end;
-
-(* Removed. tgomongoprotocol ues hello for configuration
-function TgoMongoClient.Hello: TgoBsonDocument;
-var
-  Doc: TgoBsonDocument;
-begin
-  Result.SetNil;
-  for Doc in AdminCommand(
-    procedure(Writer: IgoBsonWriter)
-    begin
-      Writer.WriteInt32('hello', 1);
-    end) do
-    Result := Doc;
-end;
- *)
-
-
 
 function TgoMongoClient.HostInfo: TgoBsonDocument;
 var
@@ -2221,12 +2216,18 @@ end;
 
 procedure TgoMongoClient.ReleaseToPool;
 begin
+  fprotocol.PrepareForReuse;
   fAvailable := True;
 end;
 
 procedure TgoMongoClient.setAvailable(const Value: Boolean);
 begin
   fAvailable := Value;
+end;
+
+procedure TgoMongoClient.setConnected(const Value: Boolean);
+begin
+  fProtocol.Connected:=Value; //may throw exception
 end;
 
 procedure TgoMongoClient.SetGlobalReadPreference(const Value: tgoMongoReadPreference);
@@ -2281,7 +2282,7 @@ begin
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  HandleCommandReply(Reply);
+  HandleCommandReply(Protocol, Reply);
   with tgoCursorHelper do
     Result := CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference);
 end;
@@ -2299,7 +2300,7 @@ begin
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  HandleCommandReply(Reply, TgoMongoErrorCode.NamespaceNotFound);
+  HandleCommandReply(Protocol, Reply, TgoMongoErrorCode.NamespaceNotFound);
 end;
 
 function TgoMongoDatabase.GetCollection(const AName: string): IgoMongoCollection;
@@ -2322,7 +2323,7 @@ begin
   Writer.WriteInt32('scale', AScale);
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  HandleCommandReply(Reply);
+  HandleCommandReply(Protocol, Reply);
   Doc := Reply.FirstDoc;
   if Doc.IsNil then
     raise EgoMongoDBError.Create(RS_MONGODB_GENERIC_ERROR);
@@ -2390,7 +2391,7 @@ begin
   Writer.WriteEndDocument;
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  Result := (HandleCommandReply(Reply) = 0);
+  Result := (HandleCommandReply(Protocol,Reply) = 0);
 end;
 
 function TgoMongoDatabase.GetReadPreference: tgoMongoReadPreference;
@@ -2425,7 +2426,7 @@ begin
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  HandleCommandReply(Reply);
+  HandleCommandReply(Protocol, Reply);
   with tgoCursorHelper do
     Result := ToDocArray(CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference));
 end;
@@ -2445,7 +2446,7 @@ begin
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  Result := (HandleCommandReply(Reply) = 0);
+  Result := (HandleCommandReply(Protocol, Reply) = 0);
 end;
 
 procedure TgoMongoDatabase.SetReadPreference(const Value: tgoMongoReadPreference);
@@ -2546,7 +2547,7 @@ begin
   Writer.WriteRawBsonDocument(AFilter.ToBson);
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  Result := HandleCommandReply(Reply);
+  Result := HandleCommandReply(Protocol, Reply);
 end;
 
 
@@ -2577,7 +2578,7 @@ begin
   Writer.WriteEndDocument;
 
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  Result := HandleCommandReply(Reply);
+  Result := HandleCommandReply(Protocol, Reply);
 end;
 
 
@@ -2630,7 +2631,7 @@ begin
   Writer.WriteEndDocument;
 
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, max(protocol.ReplyTimeout, aMaxTimeMS));
-  HandleCommandReply(Reply);
+  HandleCommandReply(Protocol, Reply);
   Result := tgoCursorHelper.CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference);
 end;
 
@@ -2673,7 +2674,7 @@ begin
   AddWriteConcern(Writer {TODO: Parameterlist} );
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  Result := (HandleCommandReply(Reply) = 0);
+  Result := (HandleCommandReply(Protocol, Reply) = 0);
 end;
 
 function TgoMongoCollection.CreateTextIndex(const AName: string; const AFields: array of string; const ALanguageOverwriteField: string = '';
@@ -2707,7 +2708,7 @@ begin
   AddWriteConcern(Writer {TODO: Parameterlist});
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  Result := (HandleCommandReply(Reply) = 0);
+  Result := (HandleCommandReply(Protocol, Reply) = 0);
 end;
 
 function TgoMongoCollection.DropIndex(const AName: string): Boolean;
@@ -2725,7 +2726,7 @@ begin
   AddWriteConcern(Writer {TODO: Parameterlist});
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  Result := (HandleCommandReply(Reply) = 0);
+  Result := (HandleCommandReply(Protocol, Reply) = 0);
 end;
 
 function TgoMongoCollection.ListIndexNames: TArray<string>;
@@ -2769,7 +2770,7 @@ begin
   SpecifyReadPreference(Writer);
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  HandleCommandReply(Reply);
+  HandleCommandReply(Protocol, Reply);
   with tgoCursorHelper do
     Result := ToDocArray(CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference));
 end;
@@ -2795,7 +2796,7 @@ begin
   AddWriteConcern(Writer {TODO: Parameterlist});
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  Result := HandleCommandReply(Reply);
+  Result := HandleCommandReply(Protocol,Reply);
 end;
 
 function TgoMongoCollection.DeleteMany(const AFilter: tgoMongoFilter; const AOrdered: Boolean): Integer;
@@ -2854,7 +2855,7 @@ begin
   AOptions.WriteOptions(Writer);
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  HandleCommandReply(Reply);
+  HandleCommandReply(Protocol,Reply);
   with tgoCursorHelper do
     Result := CreateCursor(Reply.FirstDoc, Protocol, GetReadPreference);
 end;
@@ -2983,7 +2984,7 @@ begin
     end; // FOR
 
     Reply := Protocol.OpMsg(Payload0, Payload1, False, protocol.ReplyTimeout);
-    Inc(Result, HandleCommandReply(Reply));
+    Inc(Result, HandleCommandReply(Protocol, Reply));
   end; // While
   Assert(Index = ACount);
 end;
@@ -3010,7 +3011,7 @@ begin
   AddWriteConcern(Writer {TODO: Parameterlist});
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  Result := (HandleCommandReply(Reply) = 1);
+  Result := (HandleCommandReply(Protocol, Reply) = 1);
 end;
 
 function TgoMongoCollection.Update(const AFilter: tgoMongoFilter; const AUpdate: TgoMongoUpdate; const AUpsert, AOrdered, AMulti: Boolean;  OUT Upserted:Boolean):
@@ -3040,7 +3041,7 @@ begin
   AddWriteConcern(Writer {TODO: Parameterlist});
   Writer.WriteEndDocument;
   Reply := Protocol.OpMsg(Writer.ToBson, nil, False, protocol.ReplyTimeout);
-  Result := HandleCommandReply(Reply);
+  Result := HandleCommandReply(Protocol,Reply);
 
   if aUpsert then
   begin
@@ -3672,6 +3673,7 @@ begin
       begin
         item.Available := False;  //mark it "in use" and return the item
         flock.release;
+        item.Protocol.PrepareForReuse; //remove any stale replies
         exit(item);
       end;
 
@@ -3713,8 +3715,8 @@ begin
   Result := fPort;
 end;
 
-{Purge compacts the pool by removing all currently unused connections.
- Those will be destroyed if they are not referenced.}
+{Purge compacts the pool by removing all currently available/unused
+ connections.}
 
 procedure tgoConnectionPool.Purge;
 var
@@ -3730,7 +3732,8 @@ begin
       if (item.Available) then
       begin
         item.Pooled := False; //indicate that item is no longer in a pool
-        ItemsToKill := ItemsToKill + [item]; //Move item from pool to array
+        item.Protocol.RecycleSocket:=False; //we don't want to keep the socket either
+        ItemsToKill := ItemsToKill + [item];
         flist.delete(i);
         item := nil;
       end;
@@ -3738,12 +3741,10 @@ begin
   finally
     flock.Release;
   end;
-  {The implicit finalization of this method finalizes all elements of ItemsToKill [].
-  If the connections are not referenced anywhere they will be freed here.
+  {The implicit finalization of itemstokill NILS all interfaces sequentially.
+  The objects will be destroyed only if they aren't in use.
   It may cost some time but the list isn't locked.}
 end;
-
-
 
 {ClearAll empties the pool. The connections are only destroyed if they are not in use}
 
@@ -3759,7 +3760,8 @@ begin
     begin
       item := flist[i];
       item.Pooled := False; //indicate that item is no longer in a pool
-      ItemsToKill := ItemsToKill + [item]; //Move item from pool to array
+      item.Protocol.RecycleSocket:=False;  //we don't want to keep the socket either
+      ItemsToKill := ItemsToKill + [item];
       flist.delete(i);
       item := nil;
     end;
@@ -3767,15 +3769,42 @@ begin
     flock.Release;
   end;
 
-  {The implicit finalization of this method finalizes all elements of ItemsToKill [].
-  If the connections are not referenced anywhere they will be freed here.
+  {The implicit finalization of itemstokill NILS all interfaces sequentially.
+  The objects will be destroyed only if they aren't in use.
   It may cost some time but the list isn't locked.}
+end;
+
+{Remove one client from the pool, for example when it is broken}
+
+procedure tgoConnectionPool.Remove(Client: igoMongoClient);
+var
+  i: integer;
+  item: igoMongoClient;
+begin
+  flock.Acquire;
+  try
+    for i := 0 to flist.Count - 1 do
+    begin
+      item := flist[i];
+      if (item=client) then
+      begin
+        item.Available:=false;
+        item.Pooled := False; //indicate that item is no longer in a pool
+        item.protocol.RecycleSocket:=False; //we don't want to re-use the socket
+        flist.delete(i);
+        break;
+      end;
+    end;
+  finally
+    flock.Release;
+  end;
 end;
 
 procedure tgoConnectionPool.ReleaseToPool(const Client: igoMongoClient);
 begin
   Client.ReleaseToPool;
 end;
+
 
 {$ENDREGION}
 //
