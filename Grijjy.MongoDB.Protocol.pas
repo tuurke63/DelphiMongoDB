@@ -202,6 +202,7 @@ type
     FMaxMessageSizeBytes: Integer;
     fServerknowsZlib, fServerknowsSnappy: Boolean;
     rec__1: Integer;
+    fSupportsReplication:Boolean;
 
   private
     { internal msg + reply handling}
@@ -221,7 +222,8 @@ type
     { Connection state }
     function GetConnected: Boolean;
     procedure SetConnected(Value: Boolean); // may throw exception
-    function EnsureConnected: Boolean; //auto-reconnect, used in opmsg
+
+
     function Reconnect: Boolean;
     function getRecycleSocket: Boolean;
     procedure setRecycleSocket(const Value: Boolean);
@@ -234,6 +236,7 @@ type
     procedure __RecycleConnection;
     function __RequestConnection: Boolean;
     function __ConnectSocket: Boolean;
+
 
     { authentication }
     function saslStart(const APayload: string): IgoMongoReply;
@@ -248,8 +251,6 @@ type
     procedure SocketConnected;    //unused
     procedure SocketDisconnected; //unused
     procedure SocketRecv(const ABuffer: Pointer; const ASize: Integer);
-
-
 
   public
     class procedure ConnectionFailedException(aMessage: string=''); static;
@@ -272,7 +273,11 @@ type
     function OpMsg(const ParamType0: tBytes; const ParamsType1: TArray<tgoPayloadType1>; NoResponse: Boolean; aTimeoutMS: Integer):
       IgoMongoReply;
 
-  public
+    function EnsureConnected: Boolean; //auto-reconnect, used in opmsg
+    function SupportsReplication:Boolean;
+    function SupportsTransactions:Boolean;
+
+
     { Authenticate error message if failed }
     property AuthErrorMessage: string read FAuthErrorMessage;
     { Authenticate error code if failed }
@@ -285,6 +290,7 @@ type
     property Connected: Boolean read GetConnected write SetConnected;
     property RecycleSocket: Boolean read getRecycleSocket write setRecycleSocket;
     property ReplyTimeout: Integer read FSettings.ReplyTimeout write FSettings.ReplyTimeout;
+
   end;
 
 resourcestring
@@ -465,6 +471,7 @@ begin
   FMaxMessageSizeBytes := DEF_MAX_MSG_SIZE;
   fServerknowsZlib := False;
   fServerknowsSnappy := False;
+  fSupportsReplication:=False;
 end;
 
 //ClearReplies: clears the reply queues
@@ -963,6 +970,10 @@ begin
       if not Doc.IsNil then
       begin
         debug := Doc.ToJson;
+
+
+        fSupportsReplication := Doc.Contains('setName');
+
 
         if Doc.Contains('maxWireVersion') then
           FMaxWireVersion := Doc['maxWireVersion'].AsInteger;
@@ -1668,6 +1679,16 @@ begin
   Result := fRecycleSocket;
 end;
 
+
+function TgoMongoProtocol.SupportsReplication: Boolean;
+begin
+  Result:=EnsureConnected() And fSupportsReplication;
+end;
+
+function TgoMongoProtocol.SupportsTransactions: Boolean;
+begin
+ Result:=SupportsReplication();
+end;
 
 procedure TgoMongoProtocol.setRecycleSocket(const Value: Boolean);
 begin
