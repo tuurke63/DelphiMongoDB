@@ -202,7 +202,7 @@ type
     FMaxMessageSizeBytes: Integer;
     fServerknowsZlib, fServerknowsSnappy: Boolean;
     rec__1: Integer;
-    fSupportsReplication:Boolean;
+    fSupportsReplication: Boolean;
 
   private
     { internal msg + reply handling}
@@ -223,7 +223,6 @@ type
     function GetConnected: Boolean;
     procedure SetConnected(Value: Boolean); // may throw exception
 
-
     function Reconnect: Boolean;
     function getRecycleSocket: Boolean;
     procedure setRecycleSocket(const Value: Boolean);
@@ -237,7 +236,6 @@ type
     function __RequestConnection: Boolean;
     function __ConnectSocket: Boolean;
 
-
     { authentication }
     function saslStart(const APayload: string): IgoMongoReply;
     function saslContinue(const AConversationId: Integer; const APayload: string): IgoMongoReply;
@@ -248,12 +246,12 @@ type
     procedure NegotiateProtocol;
 
     { Socket events }
-    procedure SocketConnected;    //unused
+    procedure SocketConnected; //unused
     procedure SocketDisconnected; //unused
     procedure SocketRecv(const ABuffer: Pointer; const ASize: Integer);
 
   public
-    class procedure ConnectionFailedException(aMessage: string=''); static;
+    class procedure ConnectionFailedException(aMessage: string = ''); static;
     class function IsInternalError(const errorcode: Integer): Boolean; static;
     procedure PrepareForReuse;
     function CanUseCompression: Boolean;
@@ -274,9 +272,8 @@ type
       IgoMongoReply;
 
     function EnsureConnected: Boolean; //auto-reconnect, used in opmsg
-    function SupportsReplication:Boolean;
-    function SupportsTransactions:Boolean;
-
+    function SupportsReplication: Boolean;
+    function SupportsTransactions: Boolean;
 
     { Authenticate error message if failed }
     property AuthErrorMessage: string read FAuthErrorMessage;
@@ -404,7 +401,7 @@ type
 
   end;
 
-{ tgoPayloadType1 }
+  { tgoPayloadType1 }
 
 procedure tgoPayloadType1.WriteTo(buffer: tgoByteBuffer);
 { Convert an arbitrary number of bson documents into a MSG payload of type 1 }
@@ -446,7 +443,7 @@ begin
   Assert(AHost <> '');
   Assert(APort <> 0);
   inherited Create;
-  fRecycleSocket:=True;
+  fRecycleSocket := True;
   FHost := AHost;
   FPort := APort;
   FMaxWriteBatchSize := DEF_MAX_BULK_SIZE;
@@ -471,7 +468,7 @@ begin
   FMaxMessageSizeBytes := DEF_MAX_MSG_SIZE;
   fServerknowsZlib := False;
   fServerknowsSnappy := False;
-  fSupportsReplication:=False;
+  fSupportsReplication := False;
 end;
 
 //ClearReplies: clears the reply queues
@@ -487,15 +484,13 @@ begin
   end;
 end;
 
-
-
 destructor TgoMongoProtocol.Destroy;
 begin
   FConnectionLock.Acquire;
   if fRecycleSocket then
-      __RecycleConnection
+    __RecycleConnection
   else
-      __DisposeConnection;
+    __DisposeConnection;
   FConnectionLock.Release;
 
   FCompletedReplies.Free;
@@ -508,19 +503,6 @@ begin
   inherited;
 end;
 
-
-
-
-// Getter of property Connected
-function TgoMongoProtocol.GetConnected: Boolean;
-begin
-  FConnectionLock.Acquire;
-  result:=__Connected;
-  FConnectionLock.Release;
-end;
-
-
-
 class procedure TgoMongoProtocol.ConnectionFailedException(aMessage: string);
 begin
   if aMessage = '' then
@@ -528,112 +510,7 @@ begin
   raise EgoMongoDBConnectionError.Create(aMessage);
 end;
 
-// Setter of property Connected
-procedure TgoMongoProtocol.SetConnected(Value: Boolean);
-begin
-  if (Value <> GetConnected) then
-  begin
-    if Value then
-    begin
-      if not Reconnect() then
-        ConnectionFailedException;
-    end
-    else
-    begin
-      FConnectionLock.Acquire;
-      __DisposeConnection; //closes the connection without recycling it
-      FConnectionLock.Release;
-    end;
-  end;
-end;
-
-// EnsureConnected() : called from inside op_msg()
-// Checks if we're connected, auto-reconnects if necessary.
-
-function TgoMongoProtocol.EnsureConnected: Boolean;
-begin
-  result := GetConnected();
-  if (not result) then
-    result := Reconnect();
-end;
-
-
-// Reconnect()
-// it disposes of the old connection, creates a new one and connects.
-// The method is protected against recursion :
-// reconnect --> Authenticate+Hello --> op_msg --> EnsureConnected --> Reconnect (recursion)
-
-function TgoMongoProtocol.Reconnect: Boolean;
-begin
-  result := False;
-  atomicincrement(rec__1);
-  try
-    if (rec__1 > 1) then
-      Exit(GetConnected) //protection against recursive calls
-    else
-    begin
-      FConnectionLock.Acquire;
-      try
-        result:=__Reconnect;  //call __reconnect, inside a critical section
-      finally
-        FConnectionLock.Release;
-      end;
-    end;
-  Except
-    Result:=False;
-  End;
-  atomicdecrement(rec__1);
-end;
-
-
-
-
-
-//__reconnect()
-// Internal routine, must be wrapped inside fConnectionLock critical section
-// Exceptions are possible if authentication fails
-
-function TgoMongoProtocol.__Reconnect: Boolean;
-begin
-    __DisposeConnection(); //get rid of an old connection
-    if not __RequestConnection() then  //get a new one or an existing one
-      Exit(False); //failed? then shutting down ...
-    result := __ConnectSocket(); //connect socket only if it was down
-    if result then
-    begin
-      ClearReplies; //Start with an empty reply buffer
-      ProtocolDefaults; //most basic protocol - Disable compression etc
-
-      //from here on, op_msg is going to be used, which calls ensureconnected() recursively
-
-      if not Authenticate() then // SCRAM Authenticate , Always do this, because credentials may have changed
-        raise EgoMongoDBConnectionError.Create(Format(RS_MONGODB_AUTHENTICATION_ERROR, [FAuthErrorCode, FAuthErrorMessage]));
-
-      NegotiateProtocol; // Negotiate protocol features and compression, ignore exceptions
-    end;
-end;
-
-
-
-//__RequestConnection: Try to obtain a TgoSocketConnection object from the ClientSocketManager.
-// Internal routine, must be wrapped inside connectionLock critical section
-function TgoMongoProtocol.__RequestConnection: Boolean;
-begin
-  Assert(not Assigned(FConnection), 'A connection was already there!');
-  result := False;
-  try
-    FConnection := FClientSocketManager.Request(FHost, FPort); //Request a connection from the pool
-    result := Assigned(FConnection);
-    if result then
-    begin
-      FConnection.OnConnected := SocketConnected;
-      FConnection.OnDisconnected := SocketDisconnected;
-      FConnection.OnRecv := SocketRecv;
-    end; // ELSE we are shutting down
-  except
-    //Exceptions won't happen but we trap them anyway.
-  end;
-end;
+{$REGION 'Disposing of- and recycling of a connection'}
 
 // __DisposeConnection(): Disconnects and frees the connection. fConnection is NIL afterwards.
 // Internal routine, must be wrapped inside fConnectionLock critical section
@@ -662,8 +539,9 @@ begin
     if Assigned(FConnection) then
     begin
       if FConnection.State = TgoConnectionState.Connected then
-         FClientSocketManager.Release(FConnection) //This also stops all callbacks
-      else __DisposeConnection;
+        FClientSocketManager.Release(FConnection) //This also stops all callbacks
+      else
+        __DisposeConnection;
     end;
   except
     //Exceptions won't happen but we trap them anyway.
@@ -671,38 +549,169 @@ begin
   FConnection := nil;
 end;
 
+{$ENDREGION}
+//
+{$REGION 'Getter of property Connected'}
 
 // __Connected(): returns the connection status.
-// Internal routine, must be wrapped inside fConnectionLock critical section
+// Internal routine, must be wrapped inside
+// fConnectionLock critical section
 
 function TgoMongoProtocol.__Connected: Boolean;
 begin
-    if (FConnection <> nil) then
-      result := (FConnection.State = TgoConnectionState.Connected) //just a flag
-    else
-      result := false;
+  if (FConnection <> nil) then
+    result := (FConnection.State = TgoConnectionState.Connected) //just a flag
+  else
+    result := False;
 end;
+
+// Getter of property Connected - inside a lock
+function TgoMongoProtocol.GetConnected: Boolean;
+begin
+  FConnectionLock.Acquire;
+  result := __Connected;
+  FConnectionLock.Release;
+end;
+
+{$ENDREGION}
+
+{$REGION 'Setter of property Connected'}
+
+//__RequestConnection: Try to obtain a TgoSocketConnection object from the ClientSocketManager.
+// Internal routine, must be wrapped inside connectionLock critical section
+function TgoMongoProtocol.__RequestConnection: Boolean;
+begin
+  Assert(not Assigned(FConnection), 'A connection was already there!');
+  result := False;
+  try
+    FConnection := FClientSocketManager.Request(FHost, FPort); //Request a connection from the pool
+    result := Assigned(FConnection);
+    if result then
+    begin
+      FConnection.OnConnected := SocketConnected;
+      FConnection.OnDisconnected := SocketDisconnected;
+      FConnection.OnRecv := SocketRecv;
+    end; // ELSE we are shutting down
+  except
+    //Exceptions won't happen but we trap them anyway.
+  end;
+end;
+
+//__reconnect()
+// Internal routine, must be wrapped inside fConnectionLock critical section
+// Exceptions are possible if authentication fails
+
+function TgoMongoProtocol.__Reconnect: Boolean;
+begin
+  result := False;
+  __DisposeConnection(); //get rid of an old connection if it exists
+
+  if __RequestConnection() then //get a new one or an existing one
+  begin
+    result := __ConnectSocket(); //connect socket only if it was down
+
+    if result then //ConnectSocket succeeded
+    begin
+      ClearReplies; //Start with an empty reply buffer
+      ProtocolDefaults; //most basic protocol - Disable compression etc
+
+      //from here on, op_msg is going to be used, which calls ensureconnected() recursively
+
+      if not Authenticate() then // SCRAM Authenticate , Always do this, because credentials may have changed
+        raise EgoMongoDBConnectionError.Create(Format(RS_MONGODB_AUTHENTICATION_ERROR, [FAuthErrorCode, FAuthErrorMessage]));
+
+      NegotiateProtocol; // Negotiate protocol features and compression, ignore exceptions
+    end
+    else
+      __DisposeConnection;  //__ConnectSocket FAILED
+  end;//if
+end;
+
+// Reconnect()
+// it disposes of the old connection, creates a new one and connects.
+// The method is protected against recursion :
+// reconnect --> Authenticate+Hello --> op_msg --> EnsureConnected --> Reconnect (recursion)
+
+function TgoMongoProtocol.Reconnect: Boolean;
+begin
+  result := False;
+  atomicincrement(rec__1);
+  try
+    if (rec__1 > 1) then
+      Exit(GetConnected) //protection against recursive calls
+    else
+    begin
+      FConnectionLock.Acquire;
+      try
+        result := __Reconnect; //call __reconnect, inside a critical section
+      finally
+        FConnectionLock.Release;
+      end;
+    end;
+  except //do not let exceptions out
+    result := False;
+  end;
+  atomicdecrement(rec__1);
+end;
+
+// Setter of property Connected
+procedure TgoMongoProtocol.SetConnected(Value: Boolean);
+begin
+  if (Value <> GetConnected) then
+  begin
+    if Value then
+    begin
+      if not Reconnect() then
+        ConnectionFailedException;
+    end
+    else
+    begin
+      FConnectionLock.Acquire;
+      __DisposeConnection; //closes the connection without recycling it
+      FConnectionLock.Release;
+    end;
+  end;
+end;
+
+// EnsureConnected() : called from inside op_msg()
+// Checks if we're connected, auto-reconnects if necessary.
+
+function TgoMongoProtocol.EnsureConnected: Boolean;
+begin
+  result := GetConnected(); //no exceptions possible
+  if (not result) then
+    result := Reconnect(); //no exceptions possible
+end;
+
+{$ENDREGION}
 
 // __ConnectSocket:
 // Internal routine, must be wrapped inside fConnectionLock critical section
-// If the socket is already connected, nothing is done, otherwise it tries
-// to connect the socket to the server
+// If the socket is already connected, the result is TRUE and nothing is done,
+// otherwise it tries to connect the socket to the server
 
 function TgoMongoProtocol.__ConnectSocket: Boolean;
 
-  procedure WaitForConnected;
+  function WaitForConnected: Boolean; //no exceptions possible
   var
     aNow: tStopWatch;
   begin
+    result := False;
     aNow := ThisMoment;
     repeat
-        if __connected() then exit;
+      result := __Connected();
+      if result then
+        Break
+      else
+        sleep(1); //save resources
     until (aNow.ElapsedMilliseconds > FSettings.ConnectionTimeout)
   end;
 
 begin
   Assert(Assigned(FConnection), 'There is no connection object to work with.');
   result := __Connected;
+
+  //Only perform action if not already connected
 
   if not result then
   begin
@@ -721,10 +730,12 @@ begin
     FConnection.PrivateKey := FSettings.PrivateKey;
     FConnection.Password := FSettings.PrivateKeyPassword;
 
-    if FConnection.Connect then
-      WaitForConnected;
+    // ************************************
+    // HERE the connection is initiated !!!
+    // ************************************
+    if FConnection.Connect {getaddrinfo costs time. connection itself is async. } then
+      result := WaitForConnected; //wait for success or failure
 
-    result := __Connected;
   end; //if
 end;
 
@@ -760,7 +771,7 @@ begin
   Writer.WriteName('payload');
   Writer.WriteBinaryData(TgoBsonBinaryData.Create(TEncoding.Utf8.GetBytes(APayload)));
   Writer.WriteEndDocument;
-  result := OpMsg(Writer.ToBson, nil, False, max(ReplyTimeout, 5000)) ;
+  result := OpMsg(Writer.ToBson, nil, False, max(ReplyTimeout, 5000));
   //a missing response would close the socket and throw an exception.
 end;
 
@@ -975,9 +986,7 @@ begin
       begin
         debug := Doc.ToJson;
 
-
         fSupportsReplication := Doc.Contains('setName');
-
 
         if Doc.Contains('maxWireVersion') then
           FMaxWireVersion := Doc['maxWireVersion'].AsInteger;
@@ -1372,8 +1381,6 @@ begin
   ClearReplies;
 end;
 
-
-
 procedure TgoMongoProtocol.Send(const adata: tBytes); //Send() is ONLY called from OP_MSG
 var
   Success: Boolean;
@@ -1496,7 +1503,6 @@ begin
     end;
   end;
 end;
-
 
 class function TgoMongoProtocol.IsInternalError(const errorcode: Integer): Boolean;
 begin
@@ -1680,18 +1686,17 @@ end;
 
 function TgoMongoProtocol.getRecycleSocket: Boolean;
 begin
-  Result := fRecycleSocket;
+  result := fRecycleSocket;
 end;
-
 
 function TgoMongoProtocol.SupportsReplication: Boolean;
 begin
-  Result:=EnsureConnected() And fSupportsReplication;
+  result := EnsureConnected() and fSupportsReplication;
 end;
 
 function TgoMongoProtocol.SupportsTransactions: Boolean;
 begin
- Result:=SupportsReplication();
+  result := SupportsReplication();
 end;
 
 procedure TgoMongoProtocol.setRecycleSocket(const Value: Boolean);
