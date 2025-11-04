@@ -588,6 +588,7 @@ end;
 
 
 
+
 //__reconnect()
 // Internal routine, must be wrapped inside fConnectionLock critical section
 // Exceptions are possible if authentication fails
