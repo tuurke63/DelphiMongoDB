@@ -579,9 +579,10 @@ begin
         FConnectionLock.Release;
       end;
     end;
-  finally
-    atomicdecrement(rec__1);
-  end;
+  Except
+    Result:=False;
+  End;
+  atomicdecrement(rec__1);
 end;
 
 
