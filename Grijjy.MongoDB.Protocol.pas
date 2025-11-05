@@ -255,9 +255,9 @@ type
     procedure SocketDisconnected; //unused
     procedure SocketRecv(const ABuffer: Pointer; const ASize: Integer);
 
-    procedure LogSend(const s:string);
-  public
 
+  public
+    procedure LogSend(const s:string);
     procedure ConnectionFailedException(aMessage: string = '');
     class function IsInternalError(const errorcode: Integer): Boolean; static;
     procedure PrepareForReuse;
@@ -1507,7 +1507,7 @@ begin
     if not Success then
     begin
 {$IFDEF GRIJJYLOGGING}
-      _Log.Send('Send() failed.'); //usually a disconnect event has been posted now
+      LogSend('Send() failed.'); //usually a disconnect event has been posted now
 {$ENDIF}
       __DisposeConnection;
     end;
@@ -2159,7 +2159,7 @@ end;
 initialization
 
 {$IFDEF GRIJJYLOGGING}
-  _Log := TgoLogging.Create([TgoLog.ToFile, TgoLog.ToConsole, TgoLog.ToDefault], 'MongoDB.Protocol');
+  _Log := TgoLogging.Create([TgoLog.ToFile, TgoLog.ToConsole, TgoLog.ToDefault], 'Grijjy.MongoDB.Protocol');
 {$ENDIF}
 
 finalization
