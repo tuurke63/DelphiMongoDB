@@ -11,13 +11,16 @@ uses
   System.Diagnostics, System.Math, System.SyncObjs, System.SysUtils, System.Generics.Collections, Grijjy.SysUtils,
 {$IF Defined(MSWINDOWS)}
   Grijjy.SocketPool.Win,
+  Winapi.Windows,
 {$ELSEIF Defined(LINUX)}
   Grijjy.SocketPool.Linux,
+  Posix.Pthread,
 {$ELSE}
 {$MESSAGE Error 'The MongoDB driver is only supported on Windows and Linux'}
 {$ENDIF}
 
-  Grijjy.MongoDB.Compressors, Grijjy.Bson;
+  Grijjy.MongoDB.Compressors,
+  Grijjy.Bson;
 
 const
   { Virtual collection that is used for query commands }
@@ -179,6 +182,7 @@ type
     class var
       FClientSocketManager: TgoClientSocketManager;
   private
+    fInstanceNr: Integer; //for debugging
     FHost: string;
     FPort: Integer;
     fRecycleSocket: Boolean;
@@ -235,6 +239,7 @@ type
     procedure __RecycleConnection;
     function __RequestConnection: Boolean;
     function __ConnectSocket: Boolean;
+    function __SocketParams: string;
 
     { authentication }
     function saslStart(const APayload: string): IgoMongoReply;
@@ -250,8 +255,10 @@ type
     procedure SocketDisconnected; //unused
     procedure SocketRecv(const ABuffer: Pointer; const ASize: Integer);
 
+    procedure LogSend(const s:string);
   public
-    class procedure ConnectionFailedException(aMessage: string = ''); static;
+
+    procedure ConnectionFailedException(aMessage: string = '');
     class function IsInternalError(const errorcode: Integer): Boolean; static;
     procedure PrepareForReuse;
     function CanUseCompression: Boolean;
@@ -301,7 +308,16 @@ const
 implementation
 
 uses
+{$IFDEF GRIJJYLOGGING}
+  Grijjy.System.Logging,
+{$ENDIF}
   System.DateUtils, Grijjy.Bson.IO, Grijjy.Scram;
+
+var
+{$IFDEF GRIJJYLOGGING}
+  _Log: TgoLogging;
+{$ENDIF}
+  NumProtocols: Integer = 0;
 
 type
   TMsgHeader = packed record
@@ -443,6 +459,12 @@ begin
   Assert(AHost <> '');
   Assert(APort <> 0);
   inherited Create;
+
+  fInstanceNr := AtomicIncrement(NumProtocols);
+{$IFDEF GRIJJYLOGGING}
+  LogSend(format('Created TgoMongoProtocol instance [%d]',[finstancenr]));
+{$ENDIF}
+
   fRecycleSocket := True;
   FHost := AHost;
   FPort := APort;
@@ -486,6 +508,9 @@ end;
 
 destructor TgoMongoProtocol.Destroy;
 begin
+{$IFDEF GRIJJYLOGGING}
+  LogSend('DESTROY TgoMongoProtocol');
+{$ENDIF}
   FConnectionLock.Acquire;
   if fRecycleSocket then
     __RecycleConnection
@@ -500,51 +525,70 @@ begin
   FConnectionLock.Free;
   FRecvBufferLock.Free;
   fReplyEvent.Free;
+  AtomicDecrement(NumProtocols);
   inherited;
 end;
 
-class procedure TgoMongoProtocol.ConnectionFailedException(aMessage: string);
+procedure TgoMongoProtocol.ConnectionFailedException(aMessage: string);
 begin
   if aMessage = '' then
     aMessage := 'MongoDB Connection Failed';
+{$IFDEF GRIJJYLOGGING}
+  LogSend(format('THROW ConnectionFailedException "%s"', [aMessage]));
+{$ENDIF}
   raise EgoMongoDBConnectionError.Create(aMessage);
 end;
 
 {$REGION 'Disposing of- and recycling of a connection'}
 
-// __DisposeConnection(): Disconnects and frees the connection. fConnection is NIL afterwards.
+// __DisposeConnection():
 // Internal routine, must be wrapped inside fConnectionLock critical section
+// Disconnects and frees the connection. fConnection is NIL afterwards.
 
 procedure TgoMongoProtocol.__DisposeConnection;
 begin
   try
     if Assigned(FConnection) then
     begin
+{$IFDEF GRIJJYLOGGING}
+      LogSend('DisposeConnection, ' + __SocketParams);
+{$ENDIF}
       FConnection.StopCallbacks; //its destructor does not do this unfortunately
       FConnection.Free; //also does PostDisconnect!
     end;
   except
     //Exceptions won't happen but we trap them anyway.
+{$IFDEF GRIJJYLOGGING}
+    on e: Exception do
+      LogSend('DisposeConnection, unexpected EXCEPTION' + e.message);
+{$ENDIF}
   end;
   FConnection := nil;
 end;
 
-// __RecycleConnection(): if the socket is connected it is returned to the client socket manager,
-// otherwise it is destroyed. fConnection is NIL afterwards.
+// __RecycleConnection():
 // Internal routine, must be wrapped inside fConnectionLock critical section
+// If the socket is connected it is returned to the client socket manager,
+// otherwise it is destroyed. fConnection is NIL afterwards.
 
 procedure TgoMongoProtocol.__RecycleConnection;
 begin
   try
-    if Assigned(FConnection) then
+    if __Connected then
     begin
-      if FConnection.State = TgoConnectionState.Connected then
-        FClientSocketManager.Release(FConnection) //This also stops all callbacks
-      else
-        __DisposeConnection;
-    end;
+{$IFDEF GRIJJYLOGGING}
+      LogSend('RecycleConnection, ' + __SocketParams);
+{$ENDIF}
+      FClientSocketManager.Release(FConnection); //This also stops all callbacks
+    end
+    else
+      __DisposeConnection;
   except
     //Exceptions won't happen but we trap them anyway.
+{$IFDEF GRIJJYLOGGING}
+    on e: Exception do
+      LogSend('RecycleConnection, unexpected EXCEPTION' + e.message);
+{$ENDIF}
   end;
   FConnection := nil;
 end;
@@ -553,44 +597,58 @@ end;
 //
 {$REGION 'Getter of property Connected'}
 
-// __Connected(): returns the connection status.
-// Internal routine, must be wrapped inside
-// fConnectionLock critical section
+// __Connected():
+// Internal routine, must be wrapped inside fconnectionlock critical section.
+// Returns the TCP connection status.
+// It does NOT tell you if the login procedure was completed successfully.
 
 function TgoMongoProtocol.__Connected: Boolean;
 begin
+  Result := False;
   if (FConnection <> nil) then
-    result := (FConnection.State = TgoConnectionState.Connected) //just a flag
-  else
-    result := False;
+    Result := (FConnection.Socket <> 0) and (FConnection.State = TgoConnectionState.Connected); //just a flag
 end;
 
 // Getter of property Connected - inside a lock
 function TgoMongoProtocol.GetConnected: Boolean;
 begin
   FConnectionLock.Acquire;
-  result := __Connected;
+  Result := __Connected;
   FConnectionLock.Release;
+{$IFDEF GRIJJYLOGGING}
+  if not Result then
+    LogSend('NOT connected');
+{$ENDIF}
 end;
 
 {$ENDREGION}
 
 {$REGION 'Setter of property Connected'}
 
-//__RequestConnection: Try to obtain a TgoSocketConnection object from the ClientSocketManager.
+//__RequestConnection:
 // Internal routine, must be wrapped inside connectionLock critical section
+// Obtains a TgoSocketConnection object from the ClientSocketManager.
+
 function TgoMongoProtocol.__RequestConnection: Boolean;
 begin
   Assert(not Assigned(FConnection), 'A connection was already there!');
-  result := False;
+  Result := False;
   try
     FConnection := FClientSocketManager.Request(FHost, FPort); //Request a connection from the pool
-    result := Assigned(FConnection);
-    if result then
+    Result := Assigned(FConnection);
+    if Result then
     begin
       FConnection.OnConnected := SocketConnected;
       FConnection.OnDisconnected := SocketDisconnected;
       FConnection.OnRecv := SocketRecv;
+
+{$IFDEF GRIJJYLOGGING}
+      if FConnection.Socket = 0 then
+        LogSend('RequestConnection: Got NEW (?) connection: ' + __SocketParams)
+      else
+        LogSend('RequestConnection: Got EXISTING (?) connection: ' + __SocketParams);
+{$ENDIF}
+
     end; // ELSE we are shutting down
   except
     //Exceptions won't happen but we trap them anyway.
@@ -603,14 +661,16 @@ end;
 
 function TgoMongoProtocol.__Reconnect: Boolean;
 begin
-  result := False;
-  __DisposeConnection(); //get rid of an old connection if it exists
+  Result := False;
 
   if __RequestConnection() then //get a new one or an existing one
   begin
-    result := __ConnectSocket(); //connect socket only if it was down
+    Result := __Connected;
 
-    if result then //ConnectSocket succeeded
+    if not Result then
+      Result := __ConnectSocket(); //connect socket only if it was down
+
+    if Result then //ConnectSocket succeeded
     begin
       ClearReplies; //Start with an empty reply buffer
       ProtocolDefaults; //most basic protocol - Disable compression etc
@@ -618,24 +678,30 @@ begin
       //from here on, op_msg is going to be used, which calls ensureconnected() recursively
 
       if not Authenticate() then // SCRAM Authenticate , Always do this, because credentials may have changed
-        raise EgoMongoDBConnectionError.Create(Format(RS_MONGODB_AUTHENTICATION_ERROR, [FAuthErrorCode, FAuthErrorMessage]));
+        raise EgoMongoDBConnectionError.Create(format(RS_MONGODB_AUTHENTICATION_ERROR, [FAuthErrorCode, FAuthErrorMessage]));
 
       NegotiateProtocol; // Negotiate protocol features and compression, ignore exceptions
     end
     else
-      __DisposeConnection;  //__ConnectSocket FAILED
-  end;//if
+    begin
+{$IFDEF GRIJJYLOGGING}
+      LogSend('Reconnect failed, dispose of socket.');
+{$ENDIF}
+      __DisposeConnection; //__ConnectSocket FAILED
+    end;
+  end; //if
 end;
 
 // Reconnect()
-// it disposes of the old connection, creates a new one and connects.
-// The method is protected against recursion :
+// Disposes of the old connection if necessary,
+// Creates a new one and connects.
+// The method is protected against endless recursion :
 // reconnect --> Authenticate+Hello --> op_msg --> EnsureConnected --> Reconnect (recursion)
 
 function TgoMongoProtocol.Reconnect: Boolean;
 begin
-  result := False;
-  atomicincrement(rec__1);
+  Result := False;
+  AtomicIncrement(rec__1);
   try
     if (rec__1 > 1) then
       Exit(GetConnected) //protection against recursive calls
@@ -643,15 +709,19 @@ begin
     begin
       FConnectionLock.Acquire;
       try
-        result := __Reconnect; //call __reconnect, inside a critical section
+        __DisposeConnection; // In case the reconnect is necessary because the existing connection failed
+{$IFDEF GRIJJYLOGGING}
+        LogSend('ReConnect() is necessary.');
+{$ENDIF}
+        Result := __Reconnect; //call __reconnect, inside a critical section
       finally
         FConnectionLock.Release;
       end;
     end;
   except //do not let exceptions out
-    result := False;
+    Result := False;
   end;
-  atomicdecrement(rec__1);
+  AtomicDecrement(rec__1);
 end;
 
 // Setter of property Connected
@@ -678,42 +748,47 @@ end;
 
 function TgoMongoProtocol.EnsureConnected: Boolean;
 begin
-  result := GetConnected(); //no exceptions possible
-  if (not result) then
-    result := Reconnect(); //no exceptions possible
+  Result := GetConnected(); //no exceptions possible
+  if (not Result) then
+    Result := Reconnect(); //no exceptions possible
 end;
 
 {$ENDREGION}
 
 // __ConnectSocket:
 // Internal routine, must be wrapped inside fConnectionLock critical section
-// If the socket is already connected, the result is TRUE and nothing is done,
-// otherwise it tries to connect the socket to the server
+// Connects the TCP socket to the server.
+// Handles SSL if necessary.
 
 function TgoMongoProtocol.__ConnectSocket: Boolean;
 
-  function WaitForConnected: Boolean; //no exceptions possible
+  function WaitForConnected(var duration: Integer): Boolean; //no exceptions possible
   var
     aNow: tStopWatch;
   begin
-    result := False;
+    Result := False;
+    duration := 0;
     aNow := ThisMoment;
     repeat
-      result := __Connected();
-      if result then
+      Result := __Connected();
+      if Result then
         Break
       else
         sleep(1); //save resources
-    until (aNow.ElapsedMilliseconds > FSettings.ConnectionTimeout)
+      duration := aNow.ElapsedMilliseconds;
+    until (duration > FSettings.ConnectionTimeout)
   end;
+
+var
+  duration: Integer;
 
 begin
   Assert(Assigned(FConnection), 'There is no connection object to work with.');
-  result := __Connected;
+  Result := __Connected;
 
   //Only perform action if not already connected
 
-  if not result then
+  if not Result then //TCP connection was DOWN
   begin
     { Enable or disable Tls support }
     FConnection.SSL := FSettings.Secure;
@@ -733,8 +808,26 @@ begin
     // ************************************
     // HERE the connection is initiated !!!
     // ************************************
-    if FConnection.Connect {getaddrinfo costs time. connection itself is async. } then
-      result := WaitForConnected; //wait for success or failure
+{$IFDEF GRIJJYLOGGING}
+    LogSend('ConnectSocket.');
+{$ENDIF}
+
+    if FConnection.Connect then {getaddrinfo costs time. connection itself is async. }
+    begin
+      Result := WaitForConnected(duration); //wait for success or failure
+{$IFDEF GRIJJYLOGGING}
+      if Result then
+        LogSend(format('ConnectSocket succeeded after %d ms.', [duration]))
+      else
+        LogSend(format('ConnectSocket timed out after %d ms.', [duration]));
+{$ENDIF}
+    end
+    else
+    begin
+{$IFDEF GRIJJYLOGGING}
+      LogSend('ConnectSocket failed with a socket or DNS problem.');
+{$ENDIF}
+    end;
 
   end; //if
 end;
@@ -755,7 +848,7 @@ begin
   Writer.WriteBinaryData(TgoBsonBinaryData.Create(TEncoding.Utf8.GetBytes(APayload)));
   Writer.WriteInt32('autoAuthorize', 1);
   Writer.WriteEndDocument;
-  result := OpMsg(Writer.ToBson, nil, False, max(ReplyTimeout, 5000));
+  Result := OpMsg(Writer.ToBson, nil, False, max(ReplyTimeout, 5000));
   //a missing response would close the socket and throw an exception.
 end;
 
@@ -771,7 +864,7 @@ begin
   Writer.WriteName('payload');
   Writer.WriteBinaryData(TgoBsonBinaryData.Create(TEncoding.Utf8.GetBytes(APayload)));
   Writer.WriteEndDocument;
-  result := OpMsg(Writer.ToBson, nil, False, max(ReplyTimeout, 5000));
+  Result := OpMsg(Writer.ToBson, nil, False, max(ReplyTimeout, 5000));
   //a missing response would close the socket and throw an exception.
 end;
 
@@ -790,9 +883,18 @@ var
   MongoReply: IgoMongoReply;
 begin
   if FSettings.AuthMechanism = TgoMongoAuthMechanism.None then
-    Exit(True)
+  begin
+{$IFDEF GRIJJYLOGGING}
+    LogSend('Authenticate: None required.');
+{$ENDIF}
+    Exit(True);
+  end
   else
   begin
+{$IFDEF GRIJJYLOGGING}
+    LogSend('Authentication required.');
+{$ENDIF}
+
     { Reset auth error code }
     FAuthErrorMessage := '';
     FAuthErrorCode := 0;
@@ -894,7 +996,7 @@ begin
         Exit(False);
       end;
 
-      result := (ConversationDoc['done'] = True);
+      Result := (ConversationDoc['done'] = True);
     finally
       Scram.Free;
     end;
@@ -916,6 +1018,10 @@ var
   debug: string;
   I: Integer;
 begin
+{$IFDEF GRIJJYLOGGING}
+  LogSend('NegotiateProtocol');
+{$ENDIF}
+
   try
     Writer := TgoBsonWriter.Create;
 
@@ -961,7 +1067,7 @@ begin
     else
       Writer.WriteString('architecture', 'arm64');
     end;
-    Writer.WriteString('version', Format('%d.%d.%d', [tosVersion.Major, tosVersion.Minor, tosVersion.Build]));
+    Writer.WriteString('version', format('%d.%d.%d', [tosVersion.Major, tosVersion.Minor, tosVersion.Build]));
     Writer.WriteEndDocument; // os}
     Writer.WriteString('platform', 'Delphi');
     Writer.WriteEndDocument; // client}
@@ -1026,13 +1132,13 @@ var
 begin
   BytesRead := 0;
   SetLength(Bson, 0);
-  result := tgoPayloadDecodeResult.pdEOF; // Assume not enough bytes for minimal bson document
+  Result := tgoPayloadDecodeResult.pdEOF; // Assume not enough bytes for minimal bson document
   if BytesAvail >= EmptyDocSize then
   begin
     move(buffer^, DocSize, sizeof(Integer)); // read size of bson document (includes docsize itself)
     if (BytesAvail >= DocSize) and (DocSize >= EmptyDocSize) then // buffer is big enough?
     begin
-      result := tgoPayloadDecodeResult.pdOK; // OK
+      Result := tgoPayloadDecodeResult.pdOK; // OK
       BytesRead := DocSize;
       if not TestMode then
       begin
@@ -1042,7 +1148,7 @@ begin
     end
     else // we'd read beyond the end of the buffer, or docsize is invalid
     begin
-      result := tgoPayloadDecodeResult.pdBufferOverrun;
+      Result := tgoPayloadDecodeResult.pdBufferOverrun;
     end;
   end;
 end;
@@ -1071,7 +1177,7 @@ var
 
   function cursor: Pointer;
   begin
-    result := Pointer(intptr(SeqStart) + offs);
+    Result := Pointer(intptr(SeqStart) + offs);
   end;
 
   procedure read(var Output; bytes: Integer); // Simulate simple memory stream
@@ -1091,7 +1197,7 @@ var
 
   function BufLeft: Integer;
   begin
-    result := SizeAvail - offs;
+    Result := SizeAvail - offs;
   end;
 
   function PayloadLeft: Integer;
@@ -1099,7 +1205,7 @@ var
     PayloadProcessed: Integer;
   begin
     PayloadProcessed := offs - PayloadStart;
-    result := PayloadSize - PayloadProcessed;
+    Result := PayloadSize - PayloadProcessed;
   end;
 
   function AppendDoc(): tgoPayloadDecodeResult;
@@ -1107,8 +1213,8 @@ var
     tb: tBytes;
     bRead: Integer;
   begin
-    result := ReadBsonDoc(TestMode, tb, cursor, PayloadLeft, bRead);
-    if result = tgoPayloadDecodeResult.pdOK then
+    Result := ReadBsonDoc(TestMode, tb, cursor, PayloadLeft, bRead);
+    if Result = tgoPayloadDecodeResult.pdOK then
     begin
       if not TestMode then
       begin
@@ -1120,7 +1226,7 @@ var
   end;
 
 begin
-  result := tgoPayloadDecodeResult.pdEOF;
+  Result := tgoPayloadDecodeResult.pdEOF;
   Name := '';
   offs := 0;
   SizeRead := 0;
@@ -1145,7 +1251,7 @@ begin
         case PayloadType of
 
           0: // Type 0: contains ONE BSON doc
-            result := AppendDoc();
+            Result := AppendDoc();
 
           1: // Type 1: payload with string header, then zero or more BSON docs
             begin
@@ -1161,7 +1267,7 @@ begin
               end; // while
               Name := string(Cstring);
 
-              result := tgoPayloadDecodeResult.pdOK; // the specs say "0 or more" BSON documents, so 0 is acceptable
+              Result := tgoPayloadDecodeResult.pdOK; // the specs say "0 or more" BSON documents, so 0 is acceptable
 
               // pull in as many docs as possible
               while PayloadLeft > 0 do
@@ -1174,7 +1280,7 @@ begin
                     Break; // no more documents, ready
                   tgoPayloadDecodeResult.pdBufferOverrun: // Error
                     begin
-                      result := tempresult; // invalidate whole result
+                      Result := tempresult; // invalidate whole result
                       Break;
                     end;
                 else // can't occur
@@ -1185,19 +1291,19 @@ begin
         end; // case
       end // if  bufleft OK
       else if (PayloadSize < 0) or (BufLeft < PayloadSize) then
-        result := tgoPayloadDecodeResult.pdBufferOverrun;
+        Result := tgoPayloadDecodeResult.pdBufferOverrun;
     end // if PayloadType OK
     else
-      result := tgoPayloadDecodeResult.pdInvalidPayloadType; // unknown PayloadType
+      Result := tgoPayloadDecodeResult.pdInvalidPayloadType; // unknown PayloadType
   end; // if bufleft
 
-  if result = tgoPayloadDecodeResult.pdOK then
+  if Result = tgoPayloadDecodeResult.pdOK then
     SizeRead := sizeof(Byte) + PayloadSize; // Should be identical with offs
 end;
 
 function TgoMongoProtocol.CanUseCompression: Boolean;
 begin
-  result := (FSettings.UseSnappyCompression and Snappy_Implemented and fServerknowsSnappy) or //
+  Result := (FSettings.UseSnappyCompression and Snappy_Implemented and fServerknowsSnappy) or //
   (FSettings.UseZlibCompression and ZLIB_Implemented and fServerknowsZlib);
 end;
 
@@ -1248,15 +1354,22 @@ function TgoMongoProtocol.LastPartialReply(const ARequestId: Integer; out ALastR
 begin
   FRepliesLock.Acquire;
   try
-    result := FPartialReplies.TryGetValue(ARequestId, ALastRecv);
+    Result := FPartialReplies.TryGetValue(ARequestId, ALastRecv);
   finally
     FRepliesLock.Release;
   end;
 end;
 
+procedure TgoMongoProtocol.LogSend(const s: string);
+begin
+  {$IFDEF GRIJJYLOGGING}
+  _log.send(format('[%d]  %s',[finstancenr,s]));
+  {$ENDIF}
+end;
+
 function TgoMongoProtocol.ThisMoment: tStopWatch;
 begin
-  result := tStopWatch.StartNew;
+  Result := tStopWatch.StartNew;
 end;
 
 (* OpMsg remarks:
@@ -1289,7 +1402,7 @@ begin
 
   if EnsureConnected() then //this performs autoconnect if possible
   begin
-    RequestID := atomicincrement(FNextRequestId); //rolls over after 2 billion
+    RequestID := AtomicIncrement(FNextRequestId); //rolls over after 2 billion
     MsgHeader.Header.RequestID := RequestID;
     MsgHeader.Header.ResponseTo := 0;
     MsgHeader.Header.OpCode := OP_MSG;
@@ -1345,9 +1458,9 @@ begin
       end;
 
       if ExpectResponse then
-        result := WaitForReply(RequestID, fReplyEvent, aTimeoutMS) //-> on timeout: socket will be destroyed + exception
+        Result := WaitForReply(RequestID, fReplyEvent, aTimeoutMS) //-> on timeout: socket will be destroyed + exception
       else
-        result := nil;
+        Result := nil;
     finally
       if ExpectResponse then
       begin
@@ -1363,16 +1476,16 @@ end;
 
 function TgoMongoProtocol.HaveReplyMsgHeader(out AMsgHeader): Boolean;
 begin
-  result := HaveReplyMsgHeader(AMsgHeader, FRecvBuffer, FRecvSize);
+  Result := HaveReplyMsgHeader(AMsgHeader, FRecvBuffer, FRecvSize);
 end;
 
 function TgoMongoProtocol.HaveReplyMsgHeader(out AMsgHeader; tb: tBytes; Size: Integer): Boolean;
 begin
-  result := (Size >= sizeof(TMsgHeader));
-  if (result) then
+  Result := (Size >= sizeof(TMsgHeader));
+  if (Result) then
   begin
     move(tb[0], AMsgHeader, sizeof(TMsgHeader));
-    result := TMsgHeader(AMsgHeader).ValidOpcode;
+    Result := TMsgHeader(AMsgHeader).ValidOpcode;
   end;
 end;
 
@@ -1392,28 +1505,46 @@ begin
       Success := FConnection.Send(adata); //closes socket on error
   finally
     if not Success then
+    begin
+{$IFDEF GRIJJYLOGGING}
+      _Log.Send('Send() failed.'); //usually a disconnect event has been posted now
+{$ENDIF}
       __DisposeConnection;
+    end;
     FConnectionLock.Release;
     if not Success then
       ConnectionFailedException;
   end;
 end;
 
+function TgoMongoProtocol.__SocketParams: string;
+begin
+  if Assigned(FConnection) then
+    Result := format('(Socket=%d, Connection=%d, ThreadId=%d, Pending=%s)', [FConnection.Socket, Nativeuint(FConnection),
+        GetCurrentThreadId, FConnection.PendingToString])
+  else
+    Result := '(No Socket)';
+end;
+
 procedure TgoMongoProtocol.SocketConnected;
 begin
-  { Not interested (yet) }
+{$IFDEF GRIJJYLOGGING}
+  LogSend('Event:Socket Connected, ' + __SocketParams);
+{$ENDIF}
 end;
 
 procedure TgoMongoProtocol.SocketDisconnected;
 begin
-  { Not interested (yet) }
+{$IFDEF GRIJJYLOGGING}
+  LogSend('Event:Socket Disconnected, ' + __SocketParams);
+{$ENDIF}
 end;
 
 function TgoMongoProtocol.TryGetReply(const ARequestId: Integer; out AReply: IgoMongoReply): Boolean;
 begin
   FRepliesLock.Acquire;
   try
-    result := FCompletedReplies.TryGetValue(ARequestId, AReply);
+    Result := FCompletedReplies.TryGetValue(ARequestId, AReply);
   finally
     FRepliesLock.Release;
   end;
@@ -1424,7 +1555,7 @@ var
   LastRecv: tStopWatch;
   TimeLeft: Int64;
 begin
-  result := nil;
+  Result := nil;
   if (aTimeoutMS <= 0) then
     aTimeoutMS := max(FSettings.ReplyTimeout, 500);
   TimeLeft := aTimeoutMS;
@@ -1432,7 +1563,7 @@ begin
   begin
     aReplyEvent.WaitFor(TimeLeft);
 
-    if TryGetReply(ARequestId, result) then
+    if TryGetReply(ARequestId, Result) then
       Break //Normal situation, Success! Result=Reply
     else
       TimeLeft := 0; //Timeout
@@ -1458,7 +1589,7 @@ begin
   end; //while
 
   RemoveReply(ARequestId);
-  if (result = nil) then
+  if (Result = nil) then
     Recover; // There could be trash in the input buffer, blocking the system
 end;
 
@@ -1486,7 +1617,7 @@ function TgoMongoProtocol.EnsureCapacity(CapacityNeeded: Integer): Boolean;
 var
   Size: Integer;
 begin
-  result := True;
+  Result := True;
   Size := length(FRecvBuffer);
   if Size < CapacityNeeded then
   begin
@@ -1496,7 +1627,7 @@ begin
       SetLength(FRecvBuffer, Size);
     except
       // Out Of Memory, cannot do reallocmem
-      result := False;
+      Result := False;
       SetLength(FRecvBuffer, 0);
       SetLength(FRecvBuffer, RECV_BUFFER_SIZE);
       FRecvSize := 0;
@@ -1508,9 +1639,9 @@ class function TgoMongoProtocol.IsInternalError(const errorcode: Integer): Boole
 begin
   case errorcode of
     146, 147, 301:
-      result := True;
+      Result := True;
   else
-    result := False;
+    Result := False;
   end;
 end;
 
@@ -1686,17 +1817,17 @@ end;
 
 function TgoMongoProtocol.getRecycleSocket: Boolean;
 begin
-  result := fRecycleSocket;
+  Result := fRecycleSocket;
 end;
 
 function TgoMongoProtocol.SupportsReplication: Boolean;
 begin
-  result := EnsureConnected() and fSupportsReplication;
+  Result := EnsureConnected() and fSupportsReplication;
 end;
 
 function TgoMongoProtocol.SupportsTransactions: Boolean;
 begin
-  result := SupportsReplication();
+  Result := SupportsReplication();
 end;
 
 procedure TgoMongoProtocol.setRecycleSocket(const Value: Boolean);
@@ -1706,43 +1837,43 @@ end;
 
 function TMsgHeader.Compressed: Boolean;
 begin
-  result := (self.OpCode = OP_COMPRESSED);
+  Result := (self.OpCode = OP_COMPRESSED);
 end;
 
 function TMsgHeader.DataSize: Integer;
 begin
-  result := MessageLength - sizeof(self);
+  Result := MessageLength - sizeof(self);
 end;
 
 function TMsgHeader.DataStart: Pointer;
 begin
-  result := Pointer(nativeuint(@self) + sizeof(self));
+  Result := Pointer(Nativeuint(@self) + sizeof(self));
 end;
 
 function TOPCompressedHeader.CompressedDataSize: Integer;
 begin
-  result := Header.MessageLength - sizeof(self);
+  Result := Header.MessageLength - sizeof(self);
 end;
 
 function TOPCompressedHeader.DataStart: Pointer;
 begin
-  result := Pointer(nativeuint(@self) + sizeof(self));
+  Result := Pointer(Nativeuint(@self) + sizeof(self));
 end;
 
 function TOPCompressedHeader.UnCompressedDataSize: Integer;
 begin
-  result := UncompressedSize;
+  Result := UncompressedSize;
 end;
 
 function TOPCompressedHeader.UnCompressedMessageSize: Integer;
 begin
-  result := UnCompressedDataSize + sizeof(Header);
+  Result := UnCompressedDataSize + sizeof(Header);
 end;
 
 function TMsgHeader.ValidOpcode: Boolean;
 begin
   { VERY basic format detection, but better than nothing }
-  result := (self.OpCode = OP_MSG) or (self.OpCode = OP_COMPRESSED);
+  Result := (self.OpCode = OP_MSG) or (self.OpCode = OP_COMPRESSED);
 end;
 
 { TgoMongoMsgReply }
@@ -1787,7 +1918,7 @@ begin
     // read the header
     StartOfData := sizeof(FHeader);
 
-    data := Pointer(nativeuint(ABuffer) + nativeuint(StartOfData));
+    data := Pointer(Nativeuint(ABuffer) + Nativeuint(StartOfData));
 
     Avail := FHeader.Header.MessageLength - StartOfData;
     while tMsgPayload.DecodeSequence(False, data, Avail, SizeRead, PayloadType, seqname, DocBuf) = tgoPayloadDecodeResult.pdOK do
@@ -1833,7 +1964,7 @@ var
   function ChecksumOK: Boolean;
   begin
     { TODO : Implement checksum check, there's a tCRC32 at the end of the message }
-    result := True;
+    Result := True;
   end;
 
 begin
@@ -1891,26 +2022,26 @@ begin
               AllBytesRead := (aSizeRead = pHeader.Header.MessageLength);
             if AllBytesRead then
             begin
-              result := tgoReplyValidationResult.rvrOK;
+              Result := tgoReplyValidationResult.rvrOK;
               AReply := TgoMongoMsgReply.Create(@ABuffer[0], aSizeRead);
             end
               // Message decodes OK. All is well.
             else
-              result := tgoReplyValidationResult.rvrDataError; // Header opcode OK, message could be complete, but decoding fails
+              Result := tgoReplyValidationResult.rvrDataError; // Header opcode OK, message could be complete, but decoding fails
           end // if checksum OK
           else
-            result := tgoReplyValidationResult.rvrChecksumInvalid; // Header opcode OK, message could be complete, CRC fails
+            Result := tgoReplyValidationResult.rvrChecksumInvalid; // Header opcode OK, message could be complete, CRC fails
         end // if aSize big enough for Data
         else
-          result := tgoReplyValidationResult.rvrGrowing; // Header opcode OK, but message not complete yet
+          Result := tgoReplyValidationResult.rvrGrowing; // Header opcode OK, but message not complete yet
       end // if valid opcode
       else
-        result := tgoReplyValidationResult.rvrOpcodeInvalid; // Invalid header, opcode unknown
+        Result := tgoReplyValidationResult.rvrOpcodeInvalid; // Invalid header, opcode unknown
     end // if enough bytes for a header
     else
-      result := tgoReplyValidationResult.rvrNoHeader; // Buffer does not contain enough bytes for a header
+      Result := tgoReplyValidationResult.rvrNoHeader; // Buffer does not contain enough bytes for a header
   except
-    result := tgoReplyValidationResult.rvrDataError; //could be OutOfMemory as well
+    Result := tgoReplyValidationResult.rvrDataError; //could be OutOfMemory as well
     // no exceptions allowed to exit
   end;
 end;
@@ -1979,16 +2110,16 @@ begin
           end; // case zlib
       end; //case
 
-      result := ValidateOPMessage(UnpackedMsg, Source.UnCompressedMessageSize, aSizeRead, AReply);
+      Result := ValidateOPMessage(UnpackedMsg, Source.UnCompressedMessageSize, aSizeRead, AReply);
 
-      if result = tgoReplyValidationResult.rvrOK then
+      if Result = tgoReplyValidationResult.rvrOK then
         aSizeRead := Source.Header.MessageLength; // Bytes to discard!
     end // if compressed
     else
-      result := ValidateOPMessage(ABuffer, ASize, aSizeRead, AReply); // uncompressed or TRASH
+      Result := ValidateOPMessage(ABuffer, ASize, aSizeRead, AReply); // uncompressed or TRASH
   end
   else
-    result := tgoReplyValidationResult.rvrNoHeader; // not enough bytes for a header
+    Result := tgoReplyValidationResult.rvrNoHeader; // not enough bytes for a header
 
 end;
 
@@ -2005,27 +2136,37 @@ begin
     if length(FPayload0) > 0 then
       FFirstDoc := TgoBsonDocument.Load(FPayload0[0]);
   end;
-  result := FFirstDoc;
+  Result := FFirstDoc;
 end;
 
 function TgoMongoMsgReply._GetPayload0: TArray<tBytes>;
 begin
-  result := FPayload0;
+  Result := FPayload0;
 end;
 
 function TgoMongoMsgReply._GetPayload1: TArray<tgoPayloadType1>;
 begin
-  result := FPayload1;
+  Result := FPayload1;
 end;
 
 function TgoMongoMsgReply._GetResponseTo: Integer;
 begin
-  result := FHeader.Header.ResponseTo;
+  Result := FHeader.Header.ResponseTo;
 end;
 
 { TgoMongoProtocolSettings }
 
 initialization
+
+{$IFDEF GRIJJYLOGGING}
+  _Log := TgoLogging.Create([TgoLog.ToFile, TgoLog.ToConsole, TgoLog.ToDefault], 'MongoDB.Protocol');
+{$ENDIF}
+
+finalization
+
+{$IFDEF GRIJJYLOGGING}
+  _Log.Free;
+{$ENDIF}
 
 end.
 

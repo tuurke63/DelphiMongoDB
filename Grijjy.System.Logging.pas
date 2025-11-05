@@ -1,30 +1,57 @@
 unit Grijjy.System.Logging;
 
 interface
+uses
+  system.sysutils,
+  System.Classes;
+
+  {re-implementation of Grijjy.System.Logging which is unfortunately
+   missing in the GrijjyFoundation repository }
 
 type
   TgoLog = (ToFile, ToConsole, ToDefault);
   TgoLogs = set of TgoLog;
 
-  TgoLogging = class
+  igoLogging = interface
+    ['{8D5118AE-10F8-4A4D-917F-A813D09CCB15}']
+    procedure Send(const aMessage: string);
+  end;
+
+  TgoLogging = class(tinterfacedobject, igoLogging)
+  protected
+    fname:String;
   public
-    constructor Create(aMode: TgoLogs; aName: String);
-    procedure Send(aMessage: String);
+    class function NowStr:String; static;
+    constructor Create(aMode: TgoLogs; aName: string);
+    procedure Send(const aMessage: string);
   end;
 
 implementation
-uses
-  Winapi.Windows;
 
-constructor TgoLogging.Create(aMode: TgoLogs; aName: String);
+{$IFDEF MSWINDOWS}
+uses Winapi.Windows;
+{$ENDIF}
+
+constructor TgoLogging.Create(aMode: TgoLogs; aName: string);
 begin
+  inherited Create;
+  fname:=aname;
+  //dummy
 end;
 
-procedure TgoLogging.Send(aMessage: String);
+class function TgoLogging.NowStr: String;
+var tdt:tdatetime;
+begin
+   tdt:=Now;
+   DateTimeToString(Result, 'hh:nn:ss.zzz', tdt);
+end;
+
+procedure TgoLogging.Send(const aMessage: string);
 begin
 {$IFDEF MSWINDOWS}
-  OutputDebugString(PChar(aMessage));
+  OutputDebugString(PChar(nowstr+' '+ fname+' -->'+amessage));
 {$ENDIF}
 end;
 
 end.
+
