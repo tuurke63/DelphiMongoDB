@@ -187,7 +187,6 @@ type
     fInstanceNr: Integer; //for debugging
     FHost: string;
     FPort: Integer;
-    fRecycleSocket: Boolean;
     FSettings: TgoMongoProtocolSettings;
     FNextRequestId: Integer;
     FConnection: TgoSocketConnection;
@@ -230,8 +229,6 @@ type
     procedure SetConnected(Value: Boolean); // may throw exception
 
     function Reconnect: Boolean;
-    function getRecycleSocket: Boolean;
-    procedure setRecycleSocket(const Value: Boolean);
 
     { Connection internals. Routines starting with __  must be protected against recursion, wrapped in critical section.}
 
@@ -294,7 +291,7 @@ type
     property MaxMessageSizeBytes: Integer read FMaxMessageSizeBytes write FMaxMessageSizeBytes;
     property GlobalReadPreference: tgoMongoReadPreference read FSettings.GlobalReadPreference write FSettings.GlobalReadPreference;
     property Connected: Boolean read GetConnected write SetConnected;
-    property RecycleSocket: Boolean read getRecycleSocket write setRecycleSocket;
+
     property ReplyTimeout: Integer read FSettings.ReplyTimeout write FSettings.ReplyTimeout;
 
   end;
@@ -467,7 +464,6 @@ begin
   LogSend(format('Created TgoMongoProtocol instance [%d]', [fInstanceNr]));
 {$ENDIF}
 
-  fRecycleSocket := True; //By default, return used socket to the pool
   FHost := AHost;
   FPort := APort;
   FMaxWriteBatchSize := DEF_MAX_BULK_SIZE;
@@ -1811,10 +1807,6 @@ begin
   end;
 end;
 
-function TgoMongoProtocol.getRecycleSocket: Boolean;
-begin
-  Result := fRecycleSocket;
-end;
 
 function TgoMongoProtocol.SupportsReplication: Boolean;
 begin
@@ -1826,10 +1818,6 @@ begin
   Result := SupportsReplication();
 end;
 
-procedure TgoMongoProtocol.setRecycleSocket(const Value: Boolean);
-begin
-  fRecycleSocket := Value;
-end;
 
 function TMsgHeader.Compressed: Boolean;
 begin

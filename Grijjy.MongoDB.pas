@@ -2215,7 +2215,7 @@ end;
 procedure TgoMongoClient.ReleaseToPool;
 begin
 {$IFDEF GRIJJYLOGGING}
-  FProtocol.Logsend('TgoMongoClient.ReleaseToPool.');
+  _log.send('TgoMongoClient.ReleaseToPool.');
 {$ENDIF}
   FProtocol.PrepareForReuse;
   setAvailable(True);
@@ -2224,7 +2224,7 @@ end;
 procedure TgoMongoClient.TakeFromPool;
 begin
 {$IFDEF GRIJJYLOGGING}
-  FProtocol.Logsend('TgoMongoClient.TakeFromPool.');
+  _log.send('TgoMongoClient.TakeFromPool.');
 {$ENDIF}
   FProtocol.PrepareForReuse;
   setAvailable(false);
@@ -3874,13 +3874,17 @@ var
 begin
   flock.Acquire;
   try
+    {$IFDEF GRIJJYLOGGING}
+    if flist.count > 0 then
+    _log.send(format('tgoConnectionPool.Purge %d igoMongoClients.',[flist.count]));
+    {$ENDIF}
+
     for I := flist.Count - 1 downto 0 do
     begin
       item := flist[I];
       ItemsToKill := ItemsToKill + [item]; //grab a reference
+      item.takefrompool;
       item.Pooled := false; //indicate that item is no longer in a pool
-      item.Available := false;
-      item.Protocol.RecycleSocket := false; //we don't want to keep the socket either
       flist.Delete(I);
       item := nil;
     end;
@@ -3888,10 +3892,27 @@ begin
     flock.release;
   end;
 
-  {The implicit finalization of ItemsToKill NILS all interfaces
+  {implicit finalization of ItemsToKill would NIL all interfaces
   sequentially, outside of the lock.
   The objects will be physically destroyed only if they aren't
-  in use. It may cost some time but the list isn't locked.}
+  in use. It may cost some time but the list isn't locked.
+
+
+  TEST: see if any exceptions happen in destructors,
+  these would mess up the mechanism.
+  }
+
+  for i:=high(itemstokill) downto 0 do
+  begin
+    try
+      itemstokill[i]:=NIL;
+    except
+    {$IFDEF GRIJJYLOGGING}
+    on e:exception do
+      _log.send(format('tgoConnectionPool.Purge exception %s.',[e.message]));
+    {$ENDIF}
+    end;
+  end;
 end;
 
 
@@ -3910,9 +3931,8 @@ begin
       item := flist[I];
       if (item = Client) then
       begin
-        item.Available := false;
+        item.TakeFromPool;
         item.Pooled := false; //indicate that item is no longer in a pool
-        item.Protocol.RecycleSocket := false; //we don't want to re-use the socket
         flist.Delete(I);
         Break;
       end;
@@ -3920,6 +3940,7 @@ begin
   finally
     flock.release;
   end;
+  //item goes out of scope
 end;
 
 procedure tgoConnectionPool.ReleaseToPool(const Client: IgoMongoClient);
