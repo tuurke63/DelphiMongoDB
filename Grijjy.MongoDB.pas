@@ -3888,9 +3888,8 @@ begin
     flock.release;
   end;
 
-  {The implicit finalization of itemstokill NILS all interfaces
+  {The implicit finalization of ItemsToKill NILS all interfaces
   sequentially, outside of the lock.
-
   The objects will be physically destroyed only if they aren't
   in use. It may cost some time but the list isn't locked.}
 end;

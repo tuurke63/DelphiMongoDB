@@ -7,6 +7,8 @@ unit Grijjy.MongoDB.Protocol;
 
 interface
 
+{$DEFINE NeverDispose}
+
 uses
   System.Diagnostics, System.Math, System.SyncObjs, System.SysUtils, System.Generics.Collections, Grijjy.SysUtils,
 {$IF Defined(MSWINDOWS)}
@@ -235,7 +237,6 @@ type
 
     function __Connected: Boolean;
     function __Reconnect: Boolean;
-    procedure __DisposeConnection;
     procedure __RecycleConnection;
     function __RequestConnection: Boolean;
     function __ConnectSocket: Boolean;
@@ -254,10 +255,11 @@ type
     procedure SocketConnected; //unused
     procedure SocketDisconnected; //unused
     procedure SocketRecv(const ABuffer: Pointer; const ASize: Integer);
-
+    procedure Disconnect;
+    procedure __AfterReconnect;
 
   public
-    procedure LogSend(const s:string);
+    procedure LogSend(const s: string);
     procedure ConnectionFailedException(aMessage: string = '');
     class function IsInternalError(const errorcode: Integer): Boolean; static;
     procedure PrepareForReuse;
@@ -462,10 +464,10 @@ begin
 
   fInstanceNr := AtomicIncrement(NumProtocols);
 {$IFDEF GRIJJYLOGGING}
-  LogSend(format('Created TgoMongoProtocol instance [%d]',[finstancenr]));
+  LogSend(format('Created TgoMongoProtocol instance [%d]', [fInstanceNr]));
 {$ENDIF}
 
-  fRecycleSocket := True;
+  fRecycleSocket := True; //By default, return used socket to the pool
   FHost := AHost;
   FPort := APort;
   FMaxWriteBatchSize := DEF_MAX_BULK_SIZE;
@@ -512,10 +514,8 @@ begin
   LogSend('DESTROY TgoMongoProtocol');
 {$ENDIF}
   FConnectionLock.Acquire;
-  if fRecycleSocket then
-    __RecycleConnection
-  else
-    __DisposeConnection;
+  __RecycleConnection;
+
   FConnectionLock.Release;
 
   FCompletedReplies.Free;
@@ -539,50 +539,24 @@ begin
   raise EgoMongoDBConnectionError.Create(aMessage);
 end;
 
-{$REGION 'Disposing of- and recycling of a connection'}
+{$REGION 'Recycling a connection'}
 
-// __DisposeConnection():
+// __RecycleConnection():
 // Internal routine, must be wrapped inside fConnectionLock critical section
-// Disconnects and frees the connection. fConnection is NIL afterwards.
+// The connection is returned to the socket pool.
+// If it is disconnected, or if it is unused for too long, the socket pool will
+// destroy it in due course.
 
-procedure TgoMongoProtocol.__DisposeConnection;
+procedure TgoMongoProtocol.__RecycleConnection;
 begin
   try
     if Assigned(FConnection) then
     begin
 {$IFDEF GRIJJYLOGGING}
-      LogSend('DisposeConnection, ' + __SocketParams);
-{$ENDIF}
-      FConnection.StopCallbacks; //its destructor does not do this unfortunately
-      FConnection.Free; //also does PostDisconnect!
-    end;
-  except
-    //Exceptions won't happen but we trap them anyway.
-{$IFDEF GRIJJYLOGGING}
-    on e: Exception do
-      LogSend('DisposeConnection, unexpected EXCEPTION' + e.message);
-{$ENDIF}
-  end;
-  FConnection := nil;
-end;
-
-// __RecycleConnection():
-// Internal routine, must be wrapped inside fConnectionLock critical section
-// If the socket is connected it is returned to the client socket manager,
-// otherwise it is destroyed. fConnection is NIL afterwards.
-
-procedure TgoMongoProtocol.__RecycleConnection;
-begin
-  try
-    if __Connected then
-    begin
-{$IFDEF GRIJJYLOGGING}
       LogSend('RecycleConnection, ' + __SocketParams);
 {$ENDIF}
       FClientSocketManager.Release(FConnection); //This also stops all callbacks
-    end
-    else
-      __DisposeConnection;
+    end;
   except
     //Exceptions won't happen but we trap them anyway.
 {$IFDEF GRIJJYLOGGING}
@@ -625,9 +599,40 @@ end;
 
 {$REGION 'Setter of property Connected'}
 
+// Setter of property Connected
+
+procedure TgoMongoProtocol.Disconnect;
+begin
+  FConnectionLock.Acquire;
+  try
+    FConnection.Disconnect;
+    __RecycleConnection;
+  except
+    //do not let out exceptions
+  end;
+  FConnectionLock.Release;
+end;
+
+procedure TgoMongoProtocol.SetConnected(Value: Boolean);
+begin
+  if (Value <> GetConnected) then
+  begin
+    if Value then
+    begin
+      if not Reconnect() then
+        ConnectionFailedException;
+    end
+    else
+      Disconnect;
+  end;
+end;
+{$ENDREGION}
+
+{$REGION 'Connecting and Reconnecting physically'}
+
 //__RequestConnection:
 // Internal routine, must be wrapped inside connectionLock critical section
-// Obtains a TgoSocketConnection object from the ClientSocketManager.
+// Request a TgoSocketConnection from the ClientSocketManager.
 
 function TgoMongoProtocol.__RequestConnection: Boolean;
 begin
@@ -655,6 +660,21 @@ begin
   end;
 end;
 
+//__AfterReconnect:
+// Internal routine, must be wrapped inside connectionLock critical section
+// When the socket goes from down to up, clear any buffers and
+// initiate the protocol.
+
+procedure TgoMongoProtocol.__AfterReconnect;
+begin
+  ClearReplies; //Start with an empty reply buffer
+  ProtocolDefaults; //most basic protocol - Disable compression etc
+  //from here on, op_msg is going to be used, which calls ensureconnected() recursively
+  if not Authenticate() then // SCRAM Authenticate , Always do this, because credentials may have changed
+    raise EgoMongoDBConnectionError.Create(format(RS_MONGODB_AUTHENTICATION_ERROR, [FAuthErrorCode, FAuthErrorMessage]));
+  NegotiateProtocol; // Negotiate protocol features and compression, ignore exceptions
+end;
+
 //__reconnect()
 // Internal routine, must be wrapped inside fConnectionLock critical section
 // Exceptions are possible if authentication fails
@@ -662,32 +682,19 @@ end;
 function TgoMongoProtocol.__Reconnect: Boolean;
 begin
   Result := False;
-
   if __RequestConnection() then //get a new one or an existing one
   begin
     Result := __Connected;
-
     if not Result then
       Result := __ConnectSocket(); //connect socket only if it was down
-
     if Result then //ConnectSocket succeeded
-    begin
-      ClearReplies; //Start with an empty reply buffer
-      ProtocolDefaults; //most basic protocol - Disable compression etc
-
-      //from here on, op_msg is going to be used, which calls ensureconnected() recursively
-
-      if not Authenticate() then // SCRAM Authenticate , Always do this, because credentials may have changed
-        raise EgoMongoDBConnectionError.Create(format(RS_MONGODB_AUTHENTICATION_ERROR, [FAuthErrorCode, FAuthErrorMessage]));
-
-      NegotiateProtocol; // Negotiate protocol features and compression, ignore exceptions
-    end
+      __AfterReconnect
     else
     begin
 {$IFDEF GRIJJYLOGGING}
-      LogSend('Reconnect failed, dispose of socket.');
+      LogSend('Reconnect failed.');
 {$ENDIF}
-      __DisposeConnection; //__ConnectSocket FAILED
+      __RecycleConnection; //will be destroyed in due course by the background thread
     end;
   end; //if
 end;
@@ -699,47 +706,34 @@ end;
 // reconnect --> Authenticate+Hello --> op_msg --> EnsureConnected --> Reconnect (recursion)
 
 function TgoMongoProtocol.Reconnect: Boolean;
+var
+  Recursion: Boolean;
 begin
   Result := False;
-  AtomicIncrement(rec__1);
-  try
-    if (rec__1 > 1) then
-      Exit(GetConnected) //protection against recursive calls
-    else
-    begin
-      FConnectionLock.Acquire;
-      try
-        __DisposeConnection; // In case the reconnect is necessary because the existing connection failed
-{$IFDEF GRIJJYLOGGING}
-        LogSend('ReConnect() is necessary.');
-{$ENDIF}
-        Result := __Reconnect; //call __reconnect, inside a critical section
-      finally
-        FConnectionLock.Release;
-      end;
-    end;
-  except //do not let exceptions out
-    Result := False;
-  end;
-  AtomicDecrement(rec__1);
-end;
+  Recursion := (AtomicIncrement(rec__1) > 1);
 
-// Setter of property Connected
-procedure TgoMongoProtocol.SetConnected(Value: Boolean);
-begin
-  if (Value <> GetConnected) then
-  begin
-    if Value then
-    begin
-      if not Reconnect() then
-        ConnectionFailedException;
-    end
-    else
-    begin
-      FConnectionLock.Acquire;
-      __DisposeConnection; //closes the connection without recycling it
-      FConnectionLock.Release;
+  try
+    try
+      if Recursion then
+        Exit(GetConnected) //we're in a recursion (inside opMsg) - just return the socket connection state
+      else
+      begin
+        FConnectionLock.Acquire;
+        try
+          __RecycleConnection; // If the existing connection failed - let the socketpool dispose of it in due course
+{$IFDEF GRIJJYLOGGING}
+          LogSend('ReConnect() is necessary.');
+{$ENDIF}
+          Result := __Reconnect; //call __reconnect, inside a critical section, assign result
+        finally
+          FConnectionLock.Release;
+        end;
+      end;
+    except //do not let exceptions out
+      Result := False;
     end;
+  finally
+    AtomicDecrement(rec__1);
   end;
 end;
 
@@ -759,6 +753,7 @@ end;
 // Internal routine, must be wrapped inside fConnectionLock critical section
 // Connects the TCP socket to the server.
 // Handles SSL if necessary.
+// After this, the replies buffer must be cleared and the protocol must be initiated.
 
 function TgoMongoProtocol.__ConnectSocket: Boolean;
 
@@ -821,6 +816,7 @@ begin
       else
         LogSend(format('ConnectSocket timed out after %d ms.', [duration]));
 {$ENDIF}
+
     end
     else
     begin
@@ -1362,9 +1358,9 @@ end;
 
 procedure TgoMongoProtocol.LogSend(const s: string);
 begin
-  {$IFDEF GRIJJYLOGGING}
-  _log.send(format('[%d]  %s',[finstancenr,s]));
-  {$ENDIF}
+{$IFDEF GRIJJYLOGGING}
+  _Log.Send(format('[%d]  %s', [fInstanceNr, s]));
+{$ENDIF}
 end;
 
 function TgoMongoProtocol.ThisMoment: tStopWatch;
@@ -1509,7 +1505,7 @@ begin
 {$IFDEF GRIJJYLOGGING}
       LogSend('Send() failed.'); //usually a disconnect event has been posted now
 {$ENDIF}
-      __DisposeConnection;
+      __RecycleConnection; //let the socketpool get rid of the connection in due course
     end;
     FConnectionLock.Release;
     if not Success then
