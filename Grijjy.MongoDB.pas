@@ -1081,6 +1081,7 @@ type
     function GetConnectionSettings: TgoMongoClientSettings;
     function getHost: string;
     function getPort: Integer;
+    procedure RoundRobin;
   public
     constructor Create(const AHost: string; APort: Integer; const ASettings: TgoMongoClientSettings; aMaxitems: Integer);
     destructor Destroy; override;
@@ -1910,7 +1911,7 @@ end;
 class function TgoMongoClientSettings.Create: TgoMongoClientSettings;
 begin
   Fillchar(Result, sizeof(Result), 0);
-  Result.ConnectionTimeout := 5000;
+  Result.ConnectionTimeout := 10000;
   Result.ReplyTimeout := 30000;
   Result.QueryFlags := [];
   Result.Secure := false;
@@ -2210,12 +2211,12 @@ begin
       Result := doc['ok']
 end;
 
-
 // This merely sets available to TRUE and purges the message cache
 procedure TgoMongoClient.ReleaseToPool;
 begin
+
 {$IFDEF GRIJJYLOGGING}
-  _log.send('TgoMongoClient.ReleaseToPool.');
+  _Log.send(Format('TgoMongoClient.Cache [%d].', [FProtocol.instancenr]));
 {$ENDIF}
   FProtocol.PrepareForReuse;
   setAvailable(True);
@@ -2224,7 +2225,7 @@ end;
 procedure TgoMongoClient.TakeFromPool;
 begin
 {$IFDEF GRIJJYLOGGING}
-  _log.send('TgoMongoClient.TakeFromPool.');
+  _Log.send(Format('TgoMongoClient.ReUse [%d].', [FProtocol.instancenr]));
 {$ENDIF}
   FProtocol.PrepareForReuse;
   setAvailable(false);
@@ -2232,7 +2233,7 @@ end;
 
 procedure TgoMongoClient.setAvailable(const Value: Boolean);
 begin
-    fAvailable := Value;
+  fAvailable := Value;
 end;
 
 procedure TgoMongoClient.setConnected(const Value: Boolean);
@@ -3801,12 +3802,27 @@ end;
 
 {Get an available client connection from the connection pool and make it unavailable}
 
+// a round robin procedure will keep all the clients connected if possible
+procedure tgoConnectionPool.RoundRobin;
+var
+  item: IgoMongoClient;
+begin
+  if flist.Count > 1 then
+  begin
+    item := flist[0];
+    flist.Delete(0);
+    flist.add(item);
+  end;
+end;
+
+
 function tgoConnectionPool.GetAvailableClient: IgoMongoClient;
 var
   item: IgoMongoClient;
 begin
   Result := nil;
   flock.Acquire;
+  RoundRobin;
 
   try
     repeat
@@ -3824,13 +3840,13 @@ begin
       begin
         //lock is active
         item := TgoMongoClient.Create(fHost, fPort, fConnectionSettings); // no exception expected
-        {$IFDEF GRIJJYLOGGING}
-          item.Protocol.Logsend('This client is added to a connection pool and used now.');
-        {$ENDIF}
+{$IFDEF GRIJJYLOGGING}
+        item.Protocol.Logsend('This client is added to a connection pool and used now.');
+{$ENDIF}
 
         flist.add(item); //list is locked
         item.Pooled := True;
-        item.Available := False;
+        item.Available := false;
         Exit(item);
       end
       else //Max number of connections reached - sleep until one becomes available.
@@ -3874,16 +3890,16 @@ var
 begin
   flock.Acquire;
   try
-    {$IFDEF GRIJJYLOGGING}
-    if flist.count > 0 then
-    _log.send(format('tgoConnectionPool.Purge %d igoMongoClients.',[flist.count]));
-    {$ENDIF}
+{$IFDEF GRIJJYLOGGING}
+    if flist.Count > 0 then
+      _Log.send(Format('tgoConnectionPool.Purge %d igoMongoClients.', [flist.Count]));
+{$ENDIF}
 
     for I := flist.Count - 1 downto 0 do
     begin
       item := flist[I];
       ItemsToKill := ItemsToKill + [item]; //grab a reference
-      item.takefrompool;
+      item.TakeFromPool;
       item.Pooled := false; //indicate that item is no longer in a pool
       flist.Delete(I);
       item := nil;
@@ -3897,25 +3913,22 @@ begin
   The objects will be physically destroyed only if they aren't
   in use. It may cost some time but the list isn't locked.
 
-
   TEST: see if any exceptions happen in destructors,
   these would mess up the mechanism.
   }
 
-  for i:=high(itemstokill) downto 0 do
+  for I := high(ItemsToKill) downto 0 do
   begin
     try
-      itemstokill[i]:=NIL;
+      ItemsToKill[I] := nil;
     except
-    {$IFDEF GRIJJYLOGGING}
-    on e:exception do
-      _log.send(format('tgoConnectionPool.Purge exception %s.',[e.message]));
-    {$ENDIF}
+{$IFDEF GRIJJYLOGGING}
+      on e: Exception do
+        _Log.send(Format('tgoConnectionPool.Purge exception %s.', [e.message]));
+{$ENDIF}
     end;
   end;
 end;
-
-
 
 {Remove one client from the pool, for example when it is broken}
 
@@ -3942,6 +3955,7 @@ begin
   end;
   //item goes out of scope
 end;
+
 
 procedure tgoConnectionPool.ReleaseToPool(const Client: IgoMongoClient);
 begin
@@ -4690,7 +4704,7 @@ end;
 initialization
 
 {$IFDEF GRIJJYLOGGING}
-  _Log := TgoLogging.Create([TgoLog.ToFile, TgoLog.ToConsole, TgoLog.ToDefault], 'Grijjy.MongoDB');
+  _Log := TgoLogging.Create([TgoLog.ToFile, TgoLog.ToConsole, TgoLog.ToDefault], 'MongoDB');
 {$ENDIF}
 
 finalization

@@ -124,7 +124,7 @@ type
   TgoMongoProtocolSettings = record
   public
     { Timeout waiting for connection, in milliseconds.
-      Defaults to 5000 (5 seconds) }
+      Defaults to 10000 (10 seconds) }
     ConnectionTimeout: Integer;
 
     { Timeout waiting for partial or complete reply events, in milliseconds.
@@ -293,9 +293,8 @@ type
     property MaxMessageSizeBytes: Integer read FMaxMessageSizeBytes write FMaxMessageSizeBytes;
     property GlobalReadPreference: tgoMongoReadPreference read FSettings.GlobalReadPreference write FSettings.GlobalReadPreference;
     property Connected: Boolean read GetConnected write SetConnected;
-
     property ReplyTimeout: Integer read FSettings.ReplyTimeout write FSettings.ReplyTimeout;
-
+    property InstanceNr: integer read fInstanceNr;
   end;
 
 resourcestring
@@ -447,7 +446,9 @@ end;
 
 class constructor TgoMongoProtocol.Create;
 begin
-  FClientSocketManager := TgoClientSocketManager.Create(TgoSocketOptimization.Scale, TgoSocketPoolBehavior.PoolAndReuse);
+  FClientSocketManager := TgoClientSocketManager.Create(TgoSocketOptimization.Scale,
+  //TgoSocketPoolBehavior.PoolAndReuse
+  TgoSocketPoolBehavior.CreateAndDestroy );
 end;
 
 class destructor TgoMongoProtocol.Destroy;
@@ -2150,7 +2151,7 @@ end;
 initialization
 
 {$IFDEF GRIJJYLOGGING}
-  _Log := TgoLogging.Create([TgoLog.ToFile, TgoLog.ToConsole, TgoLog.ToDefault], 'Grijjy.MongoDB.Protocol');
+  _Log := TgoLogging.Create([TgoLog.ToFile, TgoLog.ToConsole, TgoLog.ToDefault], 'MongoProtocol');
 {$ENDIF}
 
 finalization

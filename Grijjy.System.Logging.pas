@@ -49,7 +49,7 @@ end;
 procedure TgoLogging.Send(const aMessage: string);
 begin
 {$IFDEF MSWINDOWS}
-  OutputDebugString(PChar(nowstr+' '+ fname+' -->'+amessage));
+  OutputDebugString(PChar(nowstr+' Grijjy.'+fname + ' -->'+amessage));
 {$ENDIF}
 end;
 
