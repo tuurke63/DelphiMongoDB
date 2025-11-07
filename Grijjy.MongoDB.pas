@@ -309,6 +309,7 @@ type
     function GetGlobalReadPreference: tgoMongoReadPreference;
     function getPooled: Boolean;
     procedure ReleaseToPool;
+    procedure TakeFromPool;
     procedure setAvailable(const Value: Boolean);
     procedure setConnected(const Value: Boolean);
     procedure SetGlobalReadPreference(const Value: tgoMongoReadPreference);
@@ -317,8 +318,8 @@ type
     //high-level calls for transactions
     function SupportsTransactions: Boolean;
     procedure StartTransaction;
-    Procedure CommitTransaction;
-    Procedure AbortTransaction;
+    procedure CommitTransaction;
+    procedure AbortTransaction;
     procedure UnpinTransaction;
 
     //internal call for transactions
@@ -1014,6 +1015,7 @@ type
     function getConnected: Boolean;
     procedure setConnected(const Value: Boolean);
     procedure ReleaseToPool;
+    procedure TakeFromPool;
     function EmptyCursor: igoMongoCursor;
     procedure IncludeTransactionDetails(const Writer: IgoBsonWriter);
     function SupportsTransactions: Boolean;
@@ -1063,8 +1065,7 @@ type
     function GetAvailableClient: IgoMongoClient; //grabs an available client connection from the pool.
     procedure Remove(Client: IgoMongoClient);
     procedure ReleaseToPool(const Client: IgoMongoClient); //Releases the connection back to the pool
-    procedure ClearAll; //Removes ALL connections;
-    procedure Purge; //Deletes currently unused connections
+    procedure Purge; //Deletes connections
     property ConnectionSettings: TgoMongoClientSettings read GetConnectionSettings;
     property Host: string read getHost;
     property Port: Integer read getPort;
@@ -1080,14 +1081,15 @@ type
     function GetConnectionSettings: TgoMongoClientSettings;
     function getHost: string;
     function getPort: Integer;
+    procedure RoundRobin;
   public
     constructor Create(const AHost: string; APort: Integer; const ASettings: TgoMongoClientSettings; aMaxitems: Integer);
     destructor Destroy; override;
     function GetAvailableClient: IgoMongoClient; //grabs an available client connection from the pool.
     procedure ReleaseToPool(const Client: IgoMongoClient); //Releases the connection back to the pool
     procedure Remove(Client: IgoMongoClient);
-    procedure ClearAll;
-    procedure Purge; //Deletes currently unused connections
+
+    procedure Purge; //Deletes connections
     property ConnectionSettings: TgoMongoClientSettings read GetConnectionSettings;
     property Host: string read getHost;
     property Port: Integer read getPort;
@@ -1320,10 +1322,18 @@ resourcestring
 implementation
 
 uses
+{$IFDEF GRIJJYLOGGING}
+  Grijjy.System.Logging,
+{$ENDIF}
   System.Math;
 
 const
   NoCursorID = 0;
+
+{$IFDEF GRIJJYLOGGING}
+var
+  _Log: TgoLogging;
+{$ENDIF}
 
 {$POINTERMATH ON}
 
@@ -1901,7 +1911,7 @@ end;
 class function TgoMongoClientSettings.Create: TgoMongoClientSettings;
 begin
   Fillchar(Result, sizeof(Result), 0);
-  Result.ConnectionTimeout := 5000;
+  Result.ConnectionTimeout := 10000;
   Result.ReplyTimeout := 30000;
   Result.QueryFlags := [];
   Result.Secure := false;
@@ -2201,10 +2211,24 @@ begin
       Result := doc['ok']
 end;
 
+// This merely sets available to TRUE and purges the message cache
 procedure TgoMongoClient.ReleaseToPool;
 begin
+
+{$IFDEF GRIJJYLOGGING}
+  _Log.send(Format('TgoMongoClient.Cache [%d].', [FProtocol.instancenr]));
+{$ENDIF}
   FProtocol.PrepareForReuse;
-  fAvailable := True;
+  setAvailable(True);
+end;
+
+procedure TgoMongoClient.TakeFromPool;
+begin
+{$IFDEF GRIJJYLOGGING}
+  _Log.send(Format('TgoMongoClient.ReUse [%d].', [FProtocol.instancenr]));
+{$ENDIF}
+  FProtocol.PrepareForReuse;
+  setAvailable(false);
 end;
 
 procedure TgoMongoClient.setAvailable(const Value: Boolean);
@@ -2225,6 +2249,12 @@ end;
 procedure TgoMongoClient.setPooled(const Value: Boolean);
 begin
   fPooled := Value;
+{$IFDEF GRIJJYLOGGING}
+  if Value then
+    FProtocol.Logsend('TgoMongoClient is pooled')
+  else
+    FProtocol.Logsend('TgoMongoClient is NOT pooled');
+{$ENDIF}
 end;
 
 // startTransaction initiates a transaction but does not send anything over the wire.
@@ -3772,44 +3802,68 @@ end;
 
 {Get an available client connection from the connection pool and make it unavailable}
 
+// a "Round robin" procedure uses all cached clients regularly, this prevents that
+// the MongoDB server closes unused connections.
+
+procedure tgoConnectionPool.RoundRobin;
+var
+  item: IgoMongoClient;
+begin
+  if flist.Count > 1 then
+  begin
+    item := flist[0];
+    flist.Delete(0);
+    flist.add(item);
+  end;
+end;
+
+
 function tgoConnectionPool.GetAvailableClient: IgoMongoClient;
 var
   item: IgoMongoClient;
 begin
   Result := nil;
-  repeat
-    flock.Acquire;
-    //Find the first available connection
-    for item in flist do
-      if (item.Available) then
+  flock.Acquire;
+  RoundRobin;
+
+  try
+    repeat
+      //Find the first available connection
+      for item in flist do
+        if (item.Available) then
+        begin
+          item.TakeFromPool;
+          Exit(item);
+        end;
+
+      //No free connections available ? Create a new one if allowed.
+
+      if (flist.Count < fMaxItems) then
       begin
-        item.Available := false; //mark it "in use" and return the item
-        flock.release;
-        item.Protocol.PrepareForReuse; //remove any stale replies
-        Exit(item);
-      end;
-
-    //No free connections available ? Create a new one if allowed.
-
-    if (flist.Count < fMaxItems) then
-    begin
-      try
         //lock is active
-        item := TgoMongoClient.Create(fHost, fPort, fConnectionSettings); // May throw exception if connection fails
+        item := TgoMongoClient.Create(fHost, fPort, fConnectionSettings); // no exception expected
+{$IFDEF GRIJJYLOGGING}
+        item.Protocol.Logsend('This client is added to a connection pool and used now.');
+{$ENDIF}
+
+        flist.add(item); //list is locked
         item.Pooled := True;
         item.Available := false;
-        flist.add(item);
         Exit(item);
-      finally
+      end
+      else //Max number of connections reached - sleep until one becomes available.
+      begin
         flock.release;
+        sleep(10);
+        flock.Acquire;
       end;
-    end
-    else //Max number of connections reached - sleep until one becomes available.
-    begin
-      flock.release;
-      sleep(1);
-    end;
-  until false;
+    until false;
+
+  finally
+    /// -> Exit target
+    flock.release;
+  end;
+
 end;
 
 function tgoConnectionPool.GetConnectionSettings: TgoMongoClientSettings;
@@ -3838,42 +3892,17 @@ var
 begin
   flock.Acquire;
   try
+{$IFDEF GRIJJYLOGGING}
+    if flist.Count > 0 then
+      _Log.send(Format('tgoConnectionPool.Purge %d igoMongoClients.', [flist.Count]));
+{$ENDIF}
+
     for I := flist.Count - 1 downto 0 do
     begin
       item := flist[I];
-      if (item.Available) then
-      begin
-        item.Pooled := false; //indicate that item is no longer in a pool
-        item.Protocol.RecycleSocket := false; //we don't want to keep the socket either
-        ItemsToKill := ItemsToKill + [item];
-        flist.Delete(I);
-        item := nil;
-      end;
-    end;
-  finally
-    flock.release;
-  end;
-  {The implicit finalization of itemstokill NILS all interfaces sequentially.
-  The objects will be destroyed only if they aren't in use.
-  It may cost some time but the list isn't locked.}
-end;
-
-{ClearAll empties the pool. The connections are only destroyed if they are not in use}
-
-procedure tgoConnectionPool.ClearAll;
-var
-  I: Integer;
-  item: IgoMongoClient;
-  ItemsToKill: TArray<IgoMongoClient>;
-begin
-  flock.Acquire;
-  try
-    for I := flist.Count - 1 downto 0 do
-    begin
-      item := flist[I];
+      ItemsToKill := ItemsToKill + [item]; //grab a reference
+      item.TakeFromPool;
       item.Pooled := false; //indicate that item is no longer in a pool
-      item.Protocol.RecycleSocket := false; //we don't want to keep the socket either
-      ItemsToKill := ItemsToKill + [item];
       flist.Delete(I);
       item := nil;
     end;
@@ -3881,9 +3910,26 @@ begin
     flock.release;
   end;
 
-  {The implicit finalization of itemstokill NILS all interfaces sequentially.
-  The objects will be destroyed only if they aren't in use.
-  It may cost some time but the list isn't locked.}
+  {implicit finalization of ItemsToKill would NIL all interfaces
+  sequentially, outside of the lock.
+  The objects will be physically destroyed only if they aren't
+  in use. It may cost some time but the list isn't locked.
+
+  TEST: see if any exceptions happen in destructors,
+  these would mess up the mechanism.
+  }
+
+  for I := high(ItemsToKill) downto 0 do
+  begin
+    try
+      ItemsToKill[I] := nil;
+    except
+{$IFDEF GRIJJYLOGGING}
+      on e: Exception do
+        _Log.send(Format('tgoConnectionPool.Purge exception %s.', [e.message]));
+{$ENDIF}
+    end;
+  end;
 end;
 
 {Remove one client from the pool, for example when it is broken}
@@ -3900,9 +3946,8 @@ begin
       item := flist[I];
       if (item = Client) then
       begin
-        item.Available := false;
+        item.TakeFromPool;
         item.Pooled := false; //indicate that item is no longer in a pool
-        item.Protocol.RecycleSocket := false; //we don't want to re-use the socket
         flist.Delete(I);
         Break;
       end;
@@ -3910,7 +3955,9 @@ begin
   finally
     flock.release;
   end;
+  //item goes out of scope
 end;
+
 
 procedure tgoConnectionPool.ReleaseToPool(const Client: IgoMongoClient);
 begin
@@ -4655,6 +4702,18 @@ class function Aggregate.CreatePipeline: igoAggregationPipeline;
 begin
   Result := tgoAggregationPipeline.Create;
 end;
+
+initialization
+
+{$IFDEF GRIJJYLOGGING}
+  _Log := TgoLogging.Create([TgoLog.ToFile, TgoLog.ToConsole, TgoLog.ToDefault], 'MongoDB');
+{$ENDIF}
+
+finalization
+
+{$IFDEF GRIJJYLOGGING}
+  _Log.Free;
+{$ENDIF}
 
 end.
 
