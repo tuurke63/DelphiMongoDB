@@ -253,7 +253,9 @@ type
     procedure SocketDisconnected; //unused
     procedure SocketRecv(const ABuffer: Pointer; const ASize: Integer);
     procedure Disconnect;
+
     procedure __AfterReconnect;
+      procedure __Disconnect;
 
   public
     procedure LogSend(const s: string);
@@ -597,16 +599,24 @@ end;
 
 // Setter of property Connected
 
+procedure TgoMongoProtocol.__Disconnect;
+begin
+  if __connected
+  then
+  begin
+    FConnection.Disconnect;
+    __RecycleConnection;
+  end;
+end;
+
 procedure TgoMongoProtocol.Disconnect;
 begin
   FConnectionLock.Acquire;
   try
-    FConnection.Disconnect;
-    __RecycleConnection;
-  except
-    //do not let out exceptions
+     __Disconnect;
+  finally
+    FConnectionLock.Release;
   end;
-  FConnectionLock.Release;
 end;
 
 procedure TgoMongoProtocol.SetConnected(Value: Boolean);
@@ -686,12 +696,7 @@ begin
     if Result then //ConnectSocket succeeded
       __AfterReconnect
     else
-    begin
-{$IFDEF GRIJJYLOGGING}
-      LogSend('Reconnect failed.');
-{$ENDIF}
-      __RecycleConnection; //will be destroyed in due course by the background thread
-    end;
+     __Disconnect;
   end; //if
 end;
 
@@ -716,7 +721,7 @@ begin
       begin
         FConnectionLock.Acquire;
         try
-          __RecycleConnection; // If the existing connection failed - let the socketpool dispose of it in due course
+          //__RecycleConnection; // If the existing connection failed - let the socketpool dispose of it in due course
 {$IFDEF GRIJJYLOGGING}
           LogSend('ReConnect() is necessary.');
 {$ENDIF}
@@ -1501,7 +1506,7 @@ begin
 {$IFDEF GRIJJYLOGGING}
       LogSend('Send() failed.'); //usually a disconnect event has been posted now
 {$ENDIF}
-      __RecycleConnection; //let the socketpool get rid of the connection in due course
+     // __RecycleConnection; //let the socketpool get rid of the connection in due course
     end;
     FConnectionLock.Release;
     if not Success then
@@ -1817,6 +1822,8 @@ function TgoMongoProtocol.SupportsTransactions: Boolean;
 begin
   Result := SupportsReplication();
 end;
+
+
 
 
 function TMsgHeader.Compressed: Boolean;
