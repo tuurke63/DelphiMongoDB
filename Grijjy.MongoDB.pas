@@ -3802,7 +3802,9 @@ end;
 
 {Get an available client connection from the connection pool and make it unavailable}
 
-// a round robin procedure will keep all the clients connected if possible
+// a "Round robin" procedure uses all cached clients regularly, this prevents that
+// the MongoDB server closes unused connections.
+
 procedure tgoConnectionPool.RoundRobin;
 var
   item: IgoMongoClient;
