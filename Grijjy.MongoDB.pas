@@ -2356,8 +2356,6 @@ end;
 // it physically starts the transaction *just once *.
 
 procedure TgoMongoClient.IncludeTransactionDetails(const Writer: IgoBsonWriter);
-var
-  doc: tgoBsonDocument;
 begin
   if fInTransaction then
   begin
@@ -4539,7 +4537,8 @@ end;
 
 class function tgoMongoExpression.&const(const ConstantValue: Double; Decimals: Integer): string;
 begin
-  Str(ConstantValue: 0: Decimals, Result);
+ //tested and verified to not use thousand separator
+ Result := Format('%.*f', [Decimals, ConstantValue],  TFormatSettings.Invariant );
 end;
 
 class function tgoMongoExpression.ref(const FieldName: string): string;
