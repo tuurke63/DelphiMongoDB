@@ -209,7 +209,7 @@ type
     rec__1: Integer;
     fSupportsReplication: Boolean;
 
-  private
+  protected
     { internal msg + reply handling}
     procedure Send(const adata: tBytes);
     procedure Recover;
@@ -227,7 +227,6 @@ type
     { Connection state }
     function GetConnected: Boolean;
     procedure SetConnected(Value: Boolean); // may throw exception
-
     function Reconnect: Boolean;
 
     { Connection internals. Routines starting with __  must be protected against recursion, wrapped in critical section.}
@@ -266,7 +265,7 @@ type
     class constructor Create;
     class destructor Destroy;
 {$ENDREGION 'Internal Declarations'}
-  public
+
     { Creates the protocol.
 
       Parameters:
@@ -586,7 +585,6 @@ function TgoMongoProtocol.Reconnect: Boolean;
 var
   Recursion: Boolean;
 begin
-  Result := False;
   Recursion := (AtomicIncrement(rec__1) > 1);
   try
     try
@@ -658,7 +656,6 @@ end;
 function TgoMongoProtocol.__RequestConnection: Boolean;
 begin
   Assert(not Assigned(FConnection), 'A connection was already there!');
-  Result := False;
   try
     FConnection := FClientSocketManager.Request(FHost, FPort); //Request a connection from the pool
     Result := Assigned(FConnection);
@@ -746,7 +743,6 @@ function TgoMongoProtocol.__ConnectSocket: Boolean;
   var
     aNow: tStopWatch;
   begin
-    Result := False;
     duration := 0;
     aNow := ThisMoment;
     repeat
@@ -1672,8 +1668,6 @@ procedure TgoMongoProtocol.SocketRecv(const ABuffer: Pointer; const ASize: Integ
   end;
 
   procedure ReportError(aResponseTo, aErrorcode: Integer; aErrorText, aErrorMnemonic: string);
-  var
-    MsgHeader: TMsgHeader;
   begin
     // Is there at least a partial reply in the input buffer, so we know the ID of the
     // request that this was a response to ?
