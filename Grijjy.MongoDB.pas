@@ -4536,9 +4536,10 @@ begin
 end;
 
 class function tgoMongoExpression.&const(const ConstantValue: Double; Decimals: Integer): string;
+var s:Shortstring;
 begin
- //tested and verified to not use thousand separator
- Result := Format('%.*f', [Decimals, ConstantValue],  TFormatSettings.Invariant );
+ Str(ConstantValue: 0: Decimals, s);
+ Result:=String(s);
 end;
 
 class function tgoMongoExpression.ref(const FieldName: string): string;
